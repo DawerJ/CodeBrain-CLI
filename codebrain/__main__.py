@@ -1670,6 +1670,90 @@ def _write_mcp_json_in(project_dir: Path, url: str, api_key: str, codebase_id: s
     (project_dir / ".mcp.json").write_text(_json.dumps(mcp, indent=2), encoding="utf-8")
 
 
+def cmd_delete_demo(args: argparse.Namespace) -> int:
+    """Delete one or all demo codebases from the server."""
+    import httpx
+    import logging as _logging
+    _logging.getLogger("httpx").setLevel(_logging.WARNING)
+    _logging.getLogger("httpcore").setLevel(_logging.WARNING)
+    from .config import load as _load_cfg
+
+    cfg = _load_cfg()
+    url = (getattr(args, "url", None) or cfg.get("url") or DEFAULT_URL).rstrip("/")
+    api_key = cfg.get("api_key") or ""
+
+    if not api_key:
+        print("No account found. Run 'codebrain signup' first.")
+        return 1
+
+    hdrs = {"X-API-Key": api_key}
+
+    try:
+        r = httpx.get(f"{url}/api/v1/demo/list", headers=hdrs, timeout=15)
+        r.raise_for_status()
+        demos = r.json().get("demos", [])
+    except Exception as e:
+        print(f"  Could not fetch demo list: {e}")
+        return 1
+
+    if not demos:
+        print("  No demo codebases found.")
+        return 0
+
+    codebase_id_flag = getattr(args, "codebase_id", None)
+    all_flag = getattr(args, "all", False)
+
+    if codebase_id_flag:
+        targets = [d for d in demos if d["id"] == codebase_id_flag]
+        if not targets:
+            print(f"  Demo codebase '{codebase_id_flag}' not found.")
+            return 1
+    elif all_flag:
+        targets = demos
+    else:
+        print()
+        print("  Demo codebases in your account:\n")
+        for i, d in enumerate(demos, 1):
+            print(f"    {i}. {d['name']}  (id: {d['id']})  created: {d['created_at'][:10]}")
+        print(f"    {len(demos) + 1}. Delete all")
+        print()
+        while True:
+            try:
+                raw = input(f"  Delete which? (1-{len(demos) + 1}): ").strip()
+                idx = int(raw) - 1
+                if idx == len(demos):
+                    targets = demos
+                    break
+                elif 0 <= idx < len(demos):
+                    targets = [demos[idx]]
+                    break
+                else:
+                    print(f"  Enter a number between 1 and {len(demos) + 1}.")
+            except (ValueError, EOFError):
+                print("  Cancelled.")
+                return 0
+
+    print()
+    for demo in targets:
+        cid = demo["id"]
+        name = demo["name"]
+        print(f"  Deleting {name} ({cid})...", end="", flush=True)
+        try:
+            r = httpx.delete(f"{url}/api/v1/demo/{cid}", headers=hdrs, timeout=15)
+            if r.status_code == 200:
+                print(" ok")
+            else:
+                print(f" failed ({r.status_code}: {r.text[:80]})")
+        except Exception as e:
+            print(f" error: {e}")
+
+    print()
+    print("  Done. To also remove local directories, delete them manually:")
+    print("    Remove-Item -Recurse -Force <project-folder>")
+    print()
+    return 0
+
+
 # ── CLI entrypoint ────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -1741,6 +1825,17 @@ def main() -> None:
     )
     p_demo.add_argument("--url", default=None, help="CodeBrain server URL (optional)")
 
+    # delete-demo
+    p_del = sub.add_parser(
+        "delete-demo",
+        help="Delete demo codebase(s) from the server",
+    )
+    p_del.add_argument("--url", default=None, help="CodeBrain server URL (optional)")
+    p_del.add_argument("--codebase-id", default=None, dest="codebase_id",
+                       help="Delete a specific demo codebase by ID")
+    p_del.add_argument("--all", action="store_true", default=False,
+                       help="Delete all demo codebases without prompting")
+
     # up
     p_up = sub.add_parser("up", help="Verify connection and optionally start file watcher")
     p_up.add_argument("--watch", action="store_true",
@@ -1777,6 +1872,8 @@ def main() -> None:
         sys.exit(cmd_rescan(args))
     elif args.command == "demo":
         sys.exit(cmd_demo(args))
+    elif args.command == "delete-demo":
+        sys.exit(cmd_delete_demo(args))
     else:
         parser.print_help()
         sys.exit(1)
