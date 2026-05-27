@@ -1,57 +1,50 @@
-# CodeBrain Client
+# CodeBrain CLI
 
-Connect your project to a CodeBrain server.
+Connect your codebase to CodeBrain — a persistent understanding layer for your AI coding assistant.
 
-## Install (teammates)
-
-Since the CodeBrain repo is private, install from the cloned repo:
+## Install
 
 ```bash
-git clone https://github.com/DawerJ/codebrain.git
-cd codebrain
-pip install .
+pip install git+https://github.com/DawerJ/CodeBrain-CLI.git
 ```
 
-This installs the `codebrain` CLI and all dependencies.
-
-## Quick start
+## Quick start (new user)
 
 ```bash
-# First time in a new project
-codebrain init \
-  --name "MyProject" \
-  --url https://yourapp.railway.app \
-  --api-key cb_... \
-  --path ./src \
-  --scan
-
-# Every morning / session start
-codebrain up
+codebrain signup   # create an account
+codebrain new      # set up your project
 ```
 
-`codebrain init` generates:
-- `.codebrain` — local config (gitignored, has your API key)
-- `.mcp.json` — MCP server config for Claude Code (gitignored, has abs paths)
+Then open your project in Claude Code and run `/project:session-start`.
+
+## Quick start (returning user, new project)
+
+```bash
+codebrain login
+codebrain new
+```
+
+## Joining a teammate's project
+
+```bash
+codebrain login
+codebrain join     # fills in .mcp.json from the committed .mcp.json.template
+```
+
+## What `codebrain new` sets up
+
+- `.codebrain` — local config (gitignored, contains your API key)
+- `.mcp.json` — MCP server config for Claude Code (gitignored)
 - `.mcp.json.template` — template for teammates to fill in (commit this)
 - `CLAUDE.md` — project instructions for Claude Code (commit this)
 - `.claude/commands/` — `/project:session-start` and `/project:session-end` slash commands
 
-`codebrain up` checks connectivity and prints your status.
-`codebrain up --watch` also starts a file watcher.
-
-## Getting your API key
-
-1. Open the CodeBrain webapp
-2. Go to Settings → API Key
-3. Copy your key
-
-## Teammate setup (for existing projects)
+## Other commands
 
 ```bash
-git clone https://github.com/DawerJ/codebrain.git
-pip install -e /path/to/codebrain   # install the main package
-cd your-project
-cp .mcp.json.template .mcp.json
-# Edit .mcp.json: fill in your Python path and API key
-codebrain up
+codebrain up         # verify connection, check for updates
+codebrain upgrade    # refresh CLAUDE.md and slash commands to latest templates
+codebrain rescan     # scan source files and push to CodeBrain
+codebrain ci         # scaffold a GitHub Actions workflow for automatic rescanning
+codebrain status     # show codebase status, staleness, active claims
 ```

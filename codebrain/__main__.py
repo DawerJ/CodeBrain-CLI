@@ -721,7 +721,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install CodeBrain client
-        run: pip install codebrain
+        run: pip install git+https://github.com/DawerJ/CodeBrain-CLI.git
 
       - name: Rescan and push to CodeBrain
         env:
@@ -1212,7 +1212,7 @@ def cmd_up(args: argparse.Namespace) -> int:
             CLIENT_VERSION = "1"
         if server_version != CLIENT_VERSION:
             print(f"  Version mismatch: local package is v{CLIENT_VERSION}, server expects v{server_version}")
-            print(f"     Run: pip install --upgrade codebrain  then restart Claude Code")
+            print(f"     Run: pip install --upgrade git+https://github.com/DawerJ/CodeBrain-CLI.git  then restart Claude Code")
         else:
             print(f"  Connected — API healthy (v{server_version})")
     except Exception as e:
