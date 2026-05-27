@@ -846,12 +846,12 @@ def cmd_signup(args: argparse.Namespace) -> int:
     api_key = data["api_key"]
     cfg = _load_cfg()
     cfg.update({"url": url, "api_key": api_key})
-    _save_cfg(cfg)
-    _ensure_gitignore(".codebrain")
+    # Save to home directory so credentials are available from any directory
+    _save_cfg(cfg, root=Path.home())
 
     print(f"\nAccount created! Logged in as '{username}'.")
     print(f"Connected to {url}")
-    print("Your API key is saved to .codebrain (gitignored).")
+    print("Your API key is saved to ~/.codebrain.")
     print("\nNext: run  codebrain new  to set up your first project.")
     return 0
 
@@ -892,10 +892,10 @@ def cmd_login(args: argparse.Namespace) -> int:
     api_key = data["api_key"]
     cfg = _load_cfg()
     cfg.update({"url": url, "api_key": api_key})
-    _save_cfg(cfg)
-    _ensure_gitignore(".codebrain")
+    # Save to home directory so credentials are available from any directory
+    _save_cfg(cfg, root=Path.home())
 
-    print(f"\nLogged in as '{username}'. Credentials saved to .codebrain.")
+    print(f"\nLogged in as '{username}'. Credentials saved to ~/.codebrain.")
     print("Run  codebrain new  to set up a project, or  codebrain up  to verify your connection.")
     return 0
 
@@ -1396,6 +1396,280 @@ def _start_watcher(src_path: str, url: str, api_key: str, codebase_id: str) -> N
         print("  Install watchdog to enable file watching: pip install watchdog")
 
 
+# ── Demo command ─────────────────────────────────────────────────────────────
+
+def cmd_demo(args: argparse.Namespace) -> int:
+    """Build a real, indexed codebase from scratch and feel what CodeBrain gives you."""
+    import time
+    import httpx
+    from .config import load as _load_cfg, save as _save_cfg
+
+    cfg = _load_cfg()
+    url = (getattr(args, "url", None) or cfg.get("url") or DEFAULT_URL).rstrip("/")
+    api_key = cfg.get("api_key") or ""
+
+    if not api_key:
+        print("No account found. Run 'codebrain signup' first.")
+        return 1
+
+    # ── Intro ──────────────────────────────────────────────────────────────────
+    print()
+    print("╔══════════════════════════════════════════════════════════════╗")
+    print("║              CodeBrain — build something real                ║")
+    print("╚══════════════════════════════════════════════════════════════╝")
+    print()
+    print("  In the next few minutes you will build a production-ready")
+    print("  codebase from scratch. CodeBrain will index every function,")
+    print("  map the architecture, and be ready to teach you the moment")
+    print("  Claude Code opens.")
+    print()
+    print("  This is how AI coding was meant to work.")
+    print()
+
+    # ── Project type selection ─────────────────────────────────────────────────
+    options = [
+        ("task_manager",     "Task Management Platform",    "projects, tasks, teams, deadlines"),
+        ("notes_app",        "AI-Powered Notes App",        "capture, search, AI summarization"),
+        ("api_service",      "Developer API Service",       "auth, rate limiting, API versioning"),
+        ("content_platform", "Content Publishing Platform", "posts, users, social feeds"),
+    ]
+
+    print("  What kind of company are you starting?\n")
+    for i, (_, name, desc) in enumerate(options, 1):
+        print(f"    {i}. {name}")
+        print(f"       {desc}")
+        print()
+
+    while True:
+        try:
+            raw = input("  Choose (1–4): ").strip()
+            idx = int(raw) - 1
+            if 0 <= idx < len(options):
+                break
+            print("  Enter a number between 1 and 4.")
+        except (ValueError, EOFError):
+            print("  Enter a number between 1 and 4.")
+
+    project_type, project_name, project_desc = options[idx]
+    print()
+    print(f"  Building your {project_name}...")
+    print()
+
+    # ── Call server ────────────────────────────────────────────────────────────
+    try:
+        r = httpx.post(
+            f"{url}/api/v1/demo/generate",
+            json={"project_type": project_type},
+            headers={"X-API-Key": api_key},
+            timeout=30,
+        )
+        if r.status_code != 200:
+            print(f"  Server error {r.status_code}: {r.text[:200]}")
+            return 1
+        data = r.json()
+    except Exception as e:
+        print(f"  Could not reach CodeBrain server: {e}")
+        return 1
+
+    codebase_id = data["codebase_id"]
+    slug = data["slug"]
+    tagline = data.get("tagline", "")
+    files = data["files"]
+
+    # ── Create project directory ───────────────────────────────────────────────
+    project_dir = Path.cwd() / slug
+    project_dir.mkdir(exist_ok=True)
+
+    # ── Write files with narration ─────────────────────────────────────────────
+    print(f"  ┌─ {project_name}")
+    print(f"  │  {tagline}")
+    print(f"  │")
+    total_functions = 0
+    for file_info in files:
+        file_path = project_dir / file_info["path"]
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+
+        print(f"  │  Writing {file_info['path']}...", end="", flush=True)
+        time.sleep(0.35)
+        file_path.write_text(file_info["content"], encoding="utf-8")
+        print(" ✓")
+
+        insight = file_info.get("insight", "")
+        if insight:
+            # Word-wrap insight to 56 chars
+            words = insight.split()
+            lines, line = [], []
+            for w in words:
+                if sum(len(x) + 1 for x in line) + len(w) > 56:
+                    lines.append(" ".join(line))
+                    line = [w]
+                else:
+                    line.append(w)
+            if line:
+                lines.append(" ".join(line))
+            print(f"  │  [CodeBrain] {lines[0]}")
+            for l in lines[1:]:
+                print(f"  │             {l}")
+        print(f"  │")
+
+    print(f"  └─ Done. {len(files)} files written.")
+    print()
+
+    # ── Count functions (scan what was written) ────────────────────────────────
+    import ast, hashlib as _hashlib
+    units = []
+    for py_file in project_dir.rglob("*.py"):
+        try:
+            src = py_file.read_text(encoding="utf-8", errors="replace")
+            tree = ast.parse(src, filename=str(py_file))
+        except Exception:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                fn_src = ast.get_source_segment(src, node) or ""
+                units.append({
+                    "name": node.name,
+                    "file_path": str(py_file),
+                    "source": fn_src,
+                    "source_hash": _hashlib.sha256(fn_src.encode()).hexdigest()[:16],
+                    "cyclomatic_complexity": 1,
+                    "criticality_score": 0.5,
+                    "profile_name": "STANDARD",
+                })
+    total_functions = len(units)
+
+    # ── Push to CodeBrain ──────────────────────────────────────────────────────
+    print(f"  Indexing {total_functions} functions into CodeBrain...", end="", flush=True)
+    try:
+        for i in range(0, len(units), 50):
+            batch = units[i:i + 50]
+            r2 = httpx.post(
+                f"{url}/api/v1/code-units",
+                json={"codebase_id": codebase_id, "units": batch},
+                headers={"X-API-Key": api_key},
+                timeout=60,
+            )
+            r2.raise_for_status()
+        print(" ✓")
+    except Exception as e:
+        print(f"\n  Warning: indexing failed ({e}). You can run 'codebrain rescan' later.")
+
+    # ── Push seed data (architecture, feature mappings, learn content) ─────────
+    seed = data.get("seed_data", {})
+    if seed:
+        _hdrs = {"X-API-Key": api_key}
+        _base = {"codebase_id": codebase_id}
+
+        if seed.get("architecture"):
+            try:
+                httpx.put(f"{url}/api/v1/architecture",
+                          json={**_base, "content": seed["architecture"]},
+                          headers=_hdrs, timeout=15)
+            except Exception:
+                pass
+
+        if seed.get("feature_mappings"):
+            try:
+                httpx.post(f"{url}/api/v1/feature-mapping",
+                           json={**_base, "mappings": seed["feature_mappings"]},
+                           headers=_hdrs, timeout=30)
+            except Exception:
+                pass
+
+        for lc in seed.get("learn_content", []):
+            try:
+                httpx.post(f"{url}/api/v1/learn-content",
+                           json={**_base, **lc},
+                           headers=_hdrs, timeout=15)
+            except Exception:
+                pass
+
+    # ── Save local config ──────────────────────────────────────────────────────
+    _save_cfg(
+        {"url": url, "api_key": api_key, "codebase_id": codebase_id,
+         "name": project_name, "path": str(project_dir)},
+        root=project_dir,
+    )
+    _ensure_gitignore_in(project_dir, ".codebrain")
+    _ensure_gitignore_in(project_dir, ".mcp.json")
+    _ensure_gitignore_in(project_dir, "__pycache__/")
+    _ensure_gitignore_in(project_dir, "*.pyc")
+
+    # ── Initialize git repo ────────────────────────────────────────────────────
+    import subprocess as _sp
+    try:
+        _sp.run(["git", "init"], cwd=str(project_dir), check=True,
+                capture_output=True, text=True)
+    except Exception:
+        pass  # git not installed or already a repo — non-fatal
+
+    # ── Write CodeBrain project files ──────────────────────────────────────────
+    _write_mcp_json_in(project_dir, url, api_key, codebase_id)
+    (project_dir / "CLAUDE.md").write_text(
+        _make_claude_md(project_name, codebase_id), encoding="utf-8"
+    )
+    commands_dir = project_dir / ".claude" / "commands"
+    commands_dir.mkdir(parents=True, exist_ok=True)
+    (commands_dir / "session-start.md").write_text(
+        _make_session_start_md(codebase_id), encoding="utf-8"
+    )
+    (commands_dir / "session-end.md").write_text(
+        _make_session_end_md(codebase_id), encoding="utf-8"
+    )
+    demo_script = data.get("demo_script", "")
+    if demo_script:
+        (commands_dir / "demo.md").write_text(demo_script, encoding="utf-8")
+
+    # ── North star moment ──────────────────────────────────────────────────────
+    print()
+    print("╔══════════════════════════════════════════════════════════════╗")
+    print("║                                                              ║")
+    print(f"║  Your {project_name:<53}║")
+    print("║  is ready.                                                   ║")
+    print("║                                                              ║")
+    print(f"║  {total_functions} functions indexed. CodeBrain knows how they connect,  ║")
+    print("║  what they depend on, and what could break.                  ║")
+    print("║                                                              ║")
+    print("║  From nothing to full codebase ownership in minutes.         ║")
+    print("║  One person. No ceiling.                                     ║")
+    print("║                                                              ║")
+    print("╚══════════════════════════════════════════════════════════════╝")
+    print()
+    print("  Next steps:")
+    print(f"    cd {slug}")
+    print(f"    code .")
+    print()
+    print("  When VS Code opens, reload once so Claude picks up the MCP config:")
+    print("    Ctrl+Shift+P  →  Developer: Reload Window")
+    print()
+    print("  Then start the experience:")
+    print(f"    /project:demo")
+    print()
+    print("  CodeBrain will walk you through your codebase — and throw")
+    print("  a real production crisis at you when you're ready.")
+    print()
+    return 0
+
+
+def _ensure_gitignore_in(project_dir: Path, entry: str) -> None:
+    gi = project_dir / ".gitignore"
+    existing = gi.read_text(encoding="utf-8") if gi.exists() else ""
+    if entry not in existing.splitlines():
+        with gi.open("a", encoding="utf-8") as f:
+            if existing and not existing.endswith("\n"):
+                f.write("\n")
+            f.write(f"{entry}\n")
+
+
+def _write_mcp_json_in(project_dir: Path, url: str, api_key: str, codebase_id: str) -> None:
+    """Write .mcp.json for the demo project using stdio transport."""
+    import json as _json
+    # Use stdio transport (runs local mcp_server_http module via python -m) —
+    # the HTTP URL transport requires a /mcp SSE endpoint on the server which isn't exposed.
+    mcp = _make_mcp_json(url, api_key)
+    (project_dir / ".mcp.json").write_text(_json.dumps(mcp, indent=2), encoding="utf-8")
+
+
 # ── CLI entrypoint ────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -1460,6 +1734,13 @@ def main() -> None:
     )
     p_ci.add_argument("--force", action="store_true", help="Overwrite existing workflow file")
 
+    # demo
+    p_demo = sub.add_parser(
+        "demo",
+        help="Build a real, CodeBrain-indexed codebase from scratch — see what's possible",
+    )
+    p_demo.add_argument("--url", default=None, help="CodeBrain server URL (optional)")
+
     # up
     p_up = sub.add_parser("up", help="Verify connection and optionally start file watcher")
     p_up.add_argument("--watch", action="store_true",
@@ -1494,6 +1775,8 @@ def main() -> None:
         sys.exit(cmd_up(args))
     elif args.command == "rescan":
         sys.exit(cmd_rescan(args))
+    elif args.command == "demo":
+        sys.exit(cmd_demo(args))
     else:
         parser.print_help()
         sys.exit(1)
