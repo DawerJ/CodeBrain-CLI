@@ -464,16 +464,259 @@ and the Last Session page uses `functions_changed` to scope the code review.
 """
 
 
+def _make_explore_md(codebase_id: str) -> str:
+    return f"""\
+Call `get_architecture(codebase_id="{codebase_id}")` immediately. Do not ask for permission.
+
+Then deliver a codebase orientation in this order:
+
+**1. The system in one sentence**
+Summarize what this codebase does and why it exists. Start with the problem it solves, not the tech stack.
+
+**2. The three layers (always include this)**
+Explain CodeBrain's knowledge model briefly:
+- Layer 1 — Code knowledge: what every function does, how it works, what would trip someone up
+- Layer 2 — Concept knowledge: a graph of concepts with edges showing what depends on what
+- Layer 3 — Human knowledge: per-developer mastery estimates, silently updated from session behavior
+This is the flywheel. Every session leaves CodeBrain smarter than before.
+
+**3. Features / major subsystems**
+List each feature from the architecture response. For each one, one sentence on what it does and where its boundaries are. If the architecture response has no features listed, say so and suggest running `codebrain rescan` to populate them.
+
+**4. Key invariants**
+Pull the invariants section from the architecture doc verbatim if present. These are the load-bearing rules — violating them silently corrupts behavior.
+
+**5. What's stale or unknown**
+Call `get_session_context(codebase_id="{codebase_id}")` in parallel with get_architecture if you haven't already this session, and surface:
+- Stale function count (if > 0: "N functions changed since last understood — run `codebrain rescan`")
+- Open unknowns count (if > 0: "N open unknowns — things previous sessions flagged but left unresolved")
+
+End with one of these, based on context:
+- If stale_count > 0: "Your codebase has drifted — run `codebrain rescan` before diving in, or tell me what you're working on and we'll go from there."
+- Otherwise: "Tell me what you're working on today, or say `investigate [question]` to trace a specific problem."
+"""
+
+
+def _make_annotate_md(codebase_id: str) -> str:
+    return f"""\
+This command captures a design note, warning, decision, or TODO and attaches it to a specific function or the codebase — so it lives with the code, not in a ticket or a chat thread.
+
+## If the user ran `/project:annotate` with no arguments
+
+Ask in a single message (all at once, not one question at a time):
+1. What function or file should this be attached to? (Leave blank for codebase-level)
+2. What's the annotation? (Paste or describe it — you can help draft if they're not sure)
+3. What type is it?
+   - `warning` — something that will break if a future dev isn't careful
+   - `todo` — work that needs doing
+   - `note` — useful context, not urgent
+   - `decision` — why a specific approach was chosen
+   - `constraint` — a hard rule that must not be violated
+4. Priority: `normal` or `high`
+
+## If the user ran `/project:annotate` with a description or context
+
+Use what they provided to infer as much as possible. If the function name is clear from context (e.g. they were just discussing a function), pre-fill it. Ask only for what's missing.
+
+## Drafting help
+
+If the user says "help me write it" or provides a rough idea, draft an annotation body using this quality bar:
+- Specific: names the exact constraint, risk, or decision — not "this is complex"
+- Actionable: a future reader knows what to do (or not do) with this information
+- Durable: will still make sense in 6 months when the context is gone
+
+Good: "Rate limiter uses a sliding window keyed on user_id + endpoint. If you add a new endpoint, you MUST add it to RATE_LIMIT_CONFIG or it will be unthrottled by default — no error, just silent unlimited access."
+Bad: "Be careful with rate limiting here."
+
+## After collecting all inputs
+
+Call:
+```
+add_annotation(
+    body="<annotation text>",
+    codebase_id="{codebase_id}",
+    function_name="<function name or blank for codebase-level>",
+    intent_type="<warning|todo|note|decision|constraint>",
+    priority="<normal|high>"
+)
+```
+
+Confirm: "Saved. This annotation will appear in get_function_context for [function] in every future session — yours and any teammate's."
+
+If the annotation reveals an open question that can't be resolved now, also call:
+```
+flag_unknown(question="<the open question>", function_name="<function>", codebase_id="{codebase_id}")
+```
+"""
+
+
+def _make_investigate_md(codebase_id: str) -> str:
+    return f"""\
+Use this command to trace a problem, answer a "how does X work" question, or understand the blast radius of a change — before touching code.
+
+## Input
+
+The user will either:
+- Run `/project:investigate <description>` — use the description as-is
+- Run `/project:investigate` with no args — ask "What do you want to investigate?" before proceeding
+
+## Step 1 — JIT gate (mandatory, run first)
+
+Call immediately:
+```
+get_jit_context(description="<their description>", codebase_id="{codebase_id}")
+```
+
+If it returns unknown or low mastery concepts relevant to the investigation, offer in one sentence:
+"Want a quick orientation on [X] before we trace this? (yes / skip)"
+
+If yes: explain the concept, check understanding, then continue.
+If skip or solid mastery: proceed immediately.
+
+## Step 2 — Find the relevant code
+
+Call in parallel:
+```
+search_functions(query="<their description>", codebase_id="{codebase_id}")
+get_architecture(codebase_id="{codebase_id}")
+```
+
+From the results, identify the 2-5 most relevant functions. Explain briefly why each is relevant — one sentence per function.
+
+## Step 3 — Go deep on each relevant function
+
+For each function identified in Step 2, call:
+```
+get_function_context(function_name="<name>", codebase_id="{codebase_id}")
+```
+
+These calls can run in parallel. Read the annotations, risk findings, callers, and constraints returned.
+
+Then synthesize across all functions:
+- **What's happening**: a plain-English explanation of the flow — numbered steps if useful
+- **What's risky**: annotations or risk findings that are relevant to the investigation
+- **What's unknown**: anything get_function_context flagged as uncertain, or that you can't explain confidently from what you've seen
+- **Blast radius** (if the user is thinking about changing something): which callers would be affected, what contracts would need to hold
+
+## Step 4 — Capture what you learned
+
+If the investigation revealed anything non-obvious (a hidden constraint, a surprising dependency, an implicit assumption), offer:
+"Want to annotate [function] with what we just found? (yes / skip)"
+
+If yes: run `/project:annotate` inline — don't make the user switch commands.
+
+If there are open questions that can't be resolved now, call:
+```
+flag_unknown(question="<the open question>", function_name="<most relevant function>", codebase_id="{codebase_id}")
+```
+
+## Step 5 — Close the loop
+
+End with one of:
+- If the user now wants to make a change: "Ready to work on this — I'll run `check_work_claims` and `claim_work` before we touch anything."
+- If the investigation answered the question: "Investigation complete. Anything else to trace, or ready to start building?"
+- If blocked by unknown: "We've hit a limit on what we can know without running it. Flag it or continue with what we have?"
+"""
+
+
+def _make_commands_md(codebase_id: str) -> str:
+    return """\
+List all available CodeBrain slash commands for this project. No tool calls needed — just print this reference card.
+
+---
+
+## Session commands
+
+| Command | What it does |
+|---------|-------------|
+| `/project:session-start` | Start a session: load context, git checks, JIT teaching gate |
+| `/project:session-end` | End a session: knowledge sweep, summary, mastery reflection, release work |
+
+## Mid-session commands
+
+| Command | What it does |
+|---------|-------------|
+| `/project:explore` | Codebase orientation: architecture, three-layer model, features, invariants, staleness |
+| `/project:annotate [description]` | Capture a design note, warning, decision, or TODO — attached to a function, not a ticket |
+| `/project:investigate [question]` | Trace a problem or "how does X work?" before touching code |
+
+## Other
+
+| Command | What it does |
+|---------|-------------|
+| `/project:check-reports` | Review open user feedback reports from production |
+| `/project:commands` | Show this reference card |
+
+---
+
+**When to reach for each one:**
+- Starting or ending work → `session-start` / `session-end`
+- New to this area of the codebase → `explore`
+- Something feels wrong or surprising → `investigate`
+- You just made a decision, found a gotcha, or want to leave a note → `annotate`
+- You forget what's available → `commands`
+"""
+
+
+# ── Global ~/.claude/CLAUDE.md ────────────────────────────────────────────────
+
+def _make_global_claude_md_section() -> str:
+    return """\
+## CodeBrain
+
+This user has CodeBrain installed — a persistent understanding layer that tracks what developers know and delivers JIT context during coding sessions.
+
+**At the start of any conversation**, check whether this project is connected to CodeBrain:
+- Look for a `.codebrain` file or a `CLAUDE.md` containing `codebase_id` in the current directory.
+- If found: follow the local `CLAUDE.md` instructions.
+- If NOT found: say this once, then help normally:
+  "This project isn't connected to CodeBrain yet. Run `codebrain new` in this folder to set it up — takes about 2 minutes and gives you architecture tracking, session memory, and JIT teaching."
+
+Don't repeat this if the user continues without setting it up."""
+
+
+def _write_global_claude_md() -> bool:
+    """Write (or update) the CodeBrain awareness block in ~/.claude/CLAUDE.md.
+    Uses HTML markers to preserve any existing user content. Returns True if file was written."""
+    import re as _re
+    global_dir = Path.home() / ".claude"
+    global_dir.mkdir(parents=True, exist_ok=True)
+    target = global_dir / "CLAUDE.md"
+
+    START = "<!-- codebrain:start -->"
+    END = "<!-- codebrain:end -->"
+    block = f"{START}\n{_make_global_claude_md_section()}\n{END}"
+
+    if not target.exists():
+        target.write_text(block + "\n", encoding="utf-8")
+        return True
+
+    existing = target.read_text(encoding="utf-8")
+    if START in existing:
+        new_content = _re.sub(
+            f"{_re.escape(START)}.*?{_re.escape(END)}",
+            block,
+            existing,
+            flags=_re.DOTALL,
+        )
+    else:
+        new_content = existing.rstrip() + "\n\n" + block + "\n"
+
+    if new_content == existing:
+        return False
+    target.write_text(new_content, encoding="utf-8")
+    return True
+
+
 # ── .mcp.json generators ──────────────────────────────────────────────────────
 
 def _make_mcp_json(url: str, api_key: str) -> dict:
     """Generate .mcp.json pointing to the codebrain client's MCP server."""
-    python_exe = sys.executable
     return {
         "mcpServers": {
             "codebrain": {
-                "command": python_exe,
-                "args": ["-m", "codebrain.mcp_server_http"],
+                "command": "codebrain",
+                "args": ["mcp"],
                 "env": {
                     "CODEBRAIN_URL": url,
                     "CODEBRAIN_API_KEY": api_key,
@@ -484,12 +727,12 @@ def _make_mcp_json(url: str, api_key: str) -> dict:
 
 
 def _make_mcp_json_template(url: str) -> str:
-    """Template teammates fill in — URL is pre-filled, they supply their own Python path + key."""
+    """Template teammates fill in — URL is pre-filled, they supply their own API key."""
     template = {
         "mcpServers": {
             "codebrain": {
-                "command": "<path-to-your-python>",
-                "args": ["-m", "codebrain.mcp_server_http"],
+                "command": "codebrain",
+                "args": ["mcp"],
                 "env": {
                     "CODEBRAIN_URL": url,
                     "CODEBRAIN_API_KEY": "<your-api-key>",
@@ -500,9 +743,7 @@ def _make_mcp_json_template(url: str) -> str:
     lines = json.dumps(template, indent=2).splitlines()
     annotated = []
     for line in lines:
-        if '"<path-to-your-python>"' in line:
-            annotated.append(line + '  // run: python -c "import sys; print(sys.executable)"')
-        elif '"<your-api-key>"' in line:
+        if '"<your-api-key>"' in line:
             annotated.append(line + "  // get from webapp: Settings -> API Key")
         else:
             annotated.append(line)
@@ -617,6 +858,14 @@ def _fetch_template(url: str, api_key: str, template_name: str, codebase_id: str
         return _make_session_start_md(codebase_id)
     if template_name == "session-end.md":
         return _make_session_end_md(codebase_id)
+    if template_name == "explore.md":
+        return _make_explore_md(codebase_id)
+    if template_name == "annotate.md":
+        return _make_annotate_md(codebase_id)
+    if template_name == "investigate.md":
+        return _make_investigate_md(codebase_id)
+    if template_name == "commands.md":
+        return _make_commands_md(codebase_id)
     return _make_claude_md(codebase_name or "project", codebase_id)
 
 
@@ -627,10 +876,14 @@ def _check_client_files_up_to_date(codebase_id: str, codebase_name: str, url: st
         (Path("CLAUDE.md"), _fetch_template(url, api_key, "CLAUDE.md", codebase_id, name)),
         (Path(".claude") / "commands" / "session-start.md", _fetch_template(url, api_key, "session-start.md", codebase_id, name)),
         (Path(".claude") / "commands" / "session-end.md", _fetch_template(url, api_key, "session-end.md", codebase_id, name)),
+        (Path(".claude") / "commands" / "explore.md", _fetch_template(url, api_key, "explore.md", codebase_id, name)),
+        (Path(".claude") / "commands" / "annotate.md", _fetch_template(url, api_key, "annotate.md", codebase_id, name)),
+        (Path(".claude") / "commands" / "investigate.md", _fetch_template(url, api_key, "investigate.md", codebase_id, name)),
+        (Path(".claude") / "commands" / "commands.md", _fetch_template(url, api_key, "commands.md", codebase_id, name)),
     ]
-    stale = [str(p) for p, canonical in checks if p.exists() and p.read_text(encoding="utf-8") != canonical]
+    stale = [str(p) for p, canonical in checks if not p.exists() or p.read_text(encoding="utf-8") != canonical]
     if stale:
-        print("\nClient files are behind the current template:")
+        print("\n⚠️  Client files are behind the current template:")
         for f in stale:
             print(f"     {f}")
         print("   Run: codebrain upgrade  to refresh them")
@@ -848,6 +1101,7 @@ def cmd_signup(args: argparse.Namespace) -> int:
     cfg.update({"url": url, "api_key": api_key})
     # Save to home directory so credentials are available from any directory
     _save_cfg(cfg, root=Path.home())
+    _write_global_claude_md()
 
     print(f"\nAccount created! Logged in as '{username}'.")
     print(f"Connected to {url}")
@@ -894,6 +1148,7 @@ def cmd_login(args: argparse.Namespace) -> int:
     cfg.update({"url": url, "api_key": api_key})
     # Save to home directory so credentials are available from any directory
     _save_cfg(cfg, root=Path.home())
+    _write_global_claude_md()
 
     print(f"\nLogged in as '{username}'. Credentials saved to ~/.codebrain.")
     print("Run  codebrain new  to set up a project, or  codebrain up  to verify your connection.")
@@ -1056,6 +1311,10 @@ def cmd_new(args: argparse.Namespace) -> int:
     for fname, make_fn in [
         ("session-start.md", _make_session_start_md),
         ("session-end.md", _make_session_end_md),
+        ("explore.md", _make_explore_md),
+        ("annotate.md", _make_annotate_md),
+        ("investigate.md", _make_investigate_md),
+        ("commands.md", _make_commands_md),
     ]:
         p = commands_dir / fname
         if not p.exists() or force:
@@ -1087,7 +1346,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     url = args.url.rstrip("/")
     api_key = args.api_key
-    codebase_name = args.name
+    codebase_name = args.name or Path.cwd().name
 
     print(f"Connecting to {url} ...", flush=True)
     try:
@@ -1164,6 +1423,10 @@ def cmd_init(args: argparse.Namespace) -> int:
     for fname, make_fn in [
         ("session-start.md", _make_session_start_md),
         ("session-end.md", _make_session_end_md),
+        ("explore.md", _make_explore_md),
+        ("annotate.md", _make_annotate_md),
+        ("investigate.md", _make_investigate_md),
+        ("commands.md", _make_commands_md),
     ]:
         p = commands_dir / fname
         if not p.exists() or args.force:
@@ -1235,6 +1498,8 @@ def cmd_up(args: argparse.Namespace) -> int:
         print(f"  Codebase: {codebase_id}")
 
     _install_git_hook()
+    if _write_global_claude_md():
+        print("  Global ~/.claude/CLAUDE.md updated.")
     print(f"\nWebapp: {url}")
     print("MCP server: configured in .mcp.json (Claude Code loads it automatically)")
 
@@ -1282,10 +1547,39 @@ def cmd_upgrade() -> int:
 
     commands_dir = Path(".claude") / "commands"
     commands_dir.mkdir(parents=True, exist_ok=True)
-    for fname in ["session-start.md", "session-end.md"]:
+    for fname in ["session-start.md", "session-end.md", "explore.md", "annotate.md", "investigate.md", "commands.md"]:
         _write_if_changed(commands_dir / fname, _fetch_template(url, api_key, fname, codebase_id, codebase_name))
 
     _install_git_hook()
+    if _write_global_claude_md():
+        updated.append(str(Path.home() / ".claude" / "CLAUDE.md"))
+
+    # Patch .mcp.json if it exists and has an outdated codebrain server entry.
+    mcp_path = Path(".mcp.json")
+    if mcp_path.exists():
+        try:
+            mcp_cfg = json.loads(mcp_path.read_text(encoding="utf-8"))
+            cb = mcp_cfg.get("mcpServers", {}).get("codebrain", {})
+            needs_patch = (
+                cb.get("command") != "codebrain"
+                or cb.get("args") != ["mcp"]
+            )
+            if needs_patch and ("CODEBRAIN_URL" in cb.get("env", {}) or url):
+                cb_env = cb.get("env", {})
+                mcp_cfg.setdefault("mcpServers", {})["codebrain"] = {
+                    "command": "codebrain",
+                    "args": ["mcp"],
+                    "env": {
+                        "CODEBRAIN_URL": cb_env.get("CODEBRAIN_URL", url),
+                        "CODEBRAIN_API_KEY": cb_env.get("CODEBRAIN_API_KEY", api_key),
+                    },
+                }
+                mcp_path.write_text(
+                    json.dumps(mcp_cfg, indent=2) + "\n", encoding="utf-8"
+                )
+                updated.append(str(mcp_path))
+        except Exception:
+            pass  # malformed .mcp.json — leave it alone
 
     if updated:
         print("Updated:")
@@ -1299,7 +1593,7 @@ def cmd_upgrade() -> int:
     if updated:
         _show_changelog(url)
         print("Restart Claude Code to pick up any changes to slash commands.")
-        print("Commit the updated files: git add CLAUDE.md .claude/ && git commit -m 'chore: upgrade codebrain client files'")
+        print("Commit the updated files: git add CLAUDE.md .mcp.json .claude/ && git commit -m 'chore: upgrade codebrain client files'")
     else:
         print("\nEverything is already up to date.")
 
@@ -1796,7 +2090,7 @@ def main() -> None:
 
     # init
     p_init = sub.add_parser("init", help="Bootstrap a project — connect to a CodeBrain server (non-interactive)")
-    p_init.add_argument("--name", required=True, help="Codebase name (must be unique on the server)")
+    p_init.add_argument("--name", default=None, help="Codebase name (defaults to current directory name)")
     p_init.add_argument("--url", required=True, help="CodeBrain server URL (e.g. https://yourapp.railway.app)")
     p_init.add_argument("--api-key", required=True, dest="api_key",
                         help="Your CodeBrain API key (get from webapp Settings -> API Key)")
@@ -1836,6 +2130,9 @@ def main() -> None:
     p_del.add_argument("--all", action="store_true", default=False,
                        help="Delete all demo codebases without prompting")
 
+    # mcp
+    sub.add_parser("mcp", help="Start the MCP server (used by Claude Code via .mcp.json)")
+
     # up
     p_up = sub.add_parser("up", help="Verify connection and optionally start file watcher")
     p_up.add_argument("--watch", action="store_true",
@@ -1866,6 +2163,9 @@ def main() -> None:
         sys.exit(cmd_upgrade())
     elif args.command == "ci":
         sys.exit(cmd_ci(force=getattr(args, "force", False)))
+    elif args.command == "mcp":
+        from .mcp_server_http import mcp as _mcp
+        _mcp.run()
     elif args.command == "up":
         sys.exit(cmd_up(args))
     elif args.command == "rescan":
