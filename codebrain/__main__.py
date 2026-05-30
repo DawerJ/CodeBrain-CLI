@@ -1563,10 +1563,9 @@ def cmd_upgrade() -> int:
         try:
             mcp_cfg = json.loads(mcp_path.read_text(encoding="utf-8"))
             cb = mcp_cfg.get("mcpServers", {}).get("codebrain", {})
-            needs_patch = (
-                cb.get("command") != "codebrain"
-                or cb.get("args") != ["mcp"]
-            )
+            # Only migrate old HTTP/SSE transport configs — leave custom stdio configs alone.
+            # A working custom command (e.g. run_mcp.py path) should survive upgrade.
+            needs_patch = "url" in cb or cb.get("type") == "sse"
             if needs_patch and ("CODEBRAIN_URL" in cb.get("env", {}) or url):
                 cb_env = cb.get("env", {})
                 mcp_cfg.setdefault("mcpServers", {})["codebrain"] = {
@@ -2170,8 +2169,12 @@ def main() -> None:
         # Windows ProactorEventLoop (default in Python 3.8+) is incompatible with
         # stdio pipes used by Claude Code / Electron. SelectorEventLoop works correctly.
         if sys.platform == "win32":
-            import asyncio
+            import asyncio, io
             asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+            # Electron sets PYTHONUNBUFFERED=1, leaving stdout as raw FileIO.
+            # MCP stdio transport requires buffered output or messages are fragmented.
+            if hasattr(sys.stdout, "buffer") and not isinstance(sys.stdout.buffer, io.BufferedWriter):
+                sys.stdout = io.TextIOWrapper(io.BufferedWriter(sys.stdout.buffer), encoding="utf-8")
         from .mcp_server_http import mcp as _mcp
         _mcp.run()
     elif args.command == "up":
