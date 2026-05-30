@@ -628,7 +628,12 @@ def rescan_stale(codebase_id: str = "") -> str:
     try:
         from .scanner import scan_file, batch_ingest
     except ImportError:
-        return "Scanner not available — install the full codebrain package to use rescan_stale locally."
+        n = len(stale_files)
+        summary_parts.append(
+            f"Scanner not available — {n} stale file(s) remain flagged. "
+            f"Re-ingestion requires the CI action or TypeScript/JS scanning support."
+        )
+        return "\n".join(summary_parts)
 
     units_to_push = []
     for fp in stale_files:
@@ -649,7 +654,12 @@ def rescan_stale(codebase_id: str = "") -> str:
             pass
 
     if not units_to_push:
-        summary_parts.append("No functions extracted from stale files.")
+        exts = {os.path.splitext(fp)[1] for fp in stale_files if os.path.splitext(fp)[1]}
+        ext_str = "/".join(sorted(exts)) if exts else "non-Python"
+        summary_parts.append(
+            f"{len(stale_files)} stale file(s) found ({ext_str}) — local scanning is not yet "
+            f"supported for these file types. Flags remain set."
+        )
         return "\n".join(summary_parts)
 
     try:
