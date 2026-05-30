@@ -2069,6 +2069,83 @@ def cmd_delete_demo(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── Agent test commands ───────────────────────────────────────────────────────
+
+def cmd_test(args: argparse.Namespace) -> int:
+    """Run agent integration tests against CodeBrain."""
+    try:
+        import anthropic  # noqa: F401
+    except ImportError:
+        print("The 'anthropic' package is required for agent tests.")
+        print("Run: pip install anthropic")
+        return 1
+
+    runner = Path(__file__).parent.parent.parent / "tests" / "agent_test_runner.py"
+    if not runner.exists():
+        print(f"Test runner not found: {runner}")
+        print("Clone the full codebrain repo to use agent tests.")
+        return 1
+
+    cmd = [sys.executable, str(runner),
+           "--mode", args.mode,
+           "--agents", str(args.agents),
+           "--model", args.model,
+           "--skill", args.skill]
+    if args.run_id:
+        cmd += ["--run-id", args.run_id]
+
+    import subprocess as _sp
+    result = _sp.run(cmd)
+    return result.returncode
+
+
+def cmd_test_results(args: argparse.Namespace) -> int:
+    """View agent test reports."""
+    from .config import require as _require_cfg
+    cfg = _require_cfg()
+    url = cfg["url"]
+    api_key = cfg["api_key"]
+
+    params: dict = {"limit": args.limit}
+    if args.run_id:
+        params["run_id"] = args.run_id
+    if args.status:
+        params["status"] = args.status
+
+    try:
+        import httpx as _httpx
+        r = _httpx.get(
+            f"{url}/api/v1/agent-test-reports",
+            params=params,
+            headers={"X-API-Key": api_key},
+            timeout=10,
+        )
+        r.raise_for_status()
+    except Exception as e:
+        print(f"Error fetching reports: {e}")
+        return 1
+
+    data = r.json()
+    reports = data.get("reports", [])
+    if not reports:
+        print("No reports found.")
+        return 0
+
+    print(f"\nAgent Test Reports ({data.get('total', len(reports))} shown)\n")
+    print(f"{'Created':<20} {'Run ID':<14} {'Type':<10} {'Sev':<8} {'Status':<10} Description")
+    print("-" * 100)
+    for rep in reports:
+        created = rep.get("created_at", "")[:16]
+        run = rep.get("run_id", "")[:12]
+        rtype = rep.get("report_type", "")[:9]
+        sev = rep.get("severity", "")[:7]
+        status = rep.get("status", "")[:9]
+        desc = rep.get("description", "")[:55]
+        print(f"{created:<20} {run:<14} {rtype:<10} {sev:<8} {status:<10} {desc}")
+
+    return 0
+
+
 # ── CLI entrypoint ────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -2170,6 +2247,20 @@ def main() -> None:
     p_rescan.add_argument("--codebase-id", default=None, dest="codebase_id",
                           help="Codebase ID (falls back to .codebrain or CODEBRAIN_CODEBASE_ID env)")
 
+    # test
+    p_test = sub.add_parser("test", help="Run agent integration tests against CodeBrain")
+    p_test.add_argument("--mode", choices=["sandbox", "prod"], default="sandbox")
+    p_test.add_argument("--agents", type=int, choices=[1, 2], default=1)
+    p_test.add_argument("--model", choices=["haiku", "sonnet"], default="haiku")
+    p_test.add_argument("--skill", choices=["novice", "intermediate", "expert"], default="intermediate")
+    p_test.add_argument("--run-id", default=None, dest="run_id")
+
+    # test-results
+    p_results = sub.add_parser("test-results", help="View agent integration test reports")
+    p_results.add_argument("--run-id", default=None, dest="run_id")
+    p_results.add_argument("--status", choices=["open", "reviewed", "resolved"], default="open")
+    p_results.add_argument("--limit", type=int, default=20)
+
     args = parser.parse_args()
 
     if args.command == "signup":
@@ -2204,6 +2295,10 @@ def main() -> None:
         sys.exit(cmd_demo(args))
     elif args.command == "delete-demo":
         sys.exit(cmd_delete_demo(args))
+    elif args.command == "test":
+        sys.exit(cmd_test(args))
+    elif args.command == "test-results":
+        sys.exit(cmd_test_results(args))
     else:
         parser.print_help()
         sys.exit(1)
