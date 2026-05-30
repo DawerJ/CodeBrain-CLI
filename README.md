@@ -12,6 +12,12 @@ pip install git+https://github.com/DawerJ/CodeBrain-CLI.git
 
 ```bash
 codebrain signup   # create an account
+codebrain demo     # build a real codebase and see CodeBrain in action
+```
+
+Or, to set up your own project:
+
+```bash
 codebrain new      # set up your project
 ```
 
@@ -42,6 +48,7 @@ codebrain join     # fills in .mcp.json from the committed .mcp.json.template
 ## Other commands
 
 ```bash
+codebrain demo       # build a real codebase from scratch and see CodeBrain in action
 codebrain up         # verify connection, check for updates
 codebrain upgrade    # refresh CLAUDE.md and slash commands to latest templates
 codebrain rescan     # scan source files and push to CodeBrain
