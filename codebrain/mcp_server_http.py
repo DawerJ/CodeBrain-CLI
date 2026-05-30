@@ -1239,6 +1239,46 @@ def submit_feedback(
 
 
 @mcp.tool()
+def submit_test_report(
+    run_id: str,
+    report_type: str,
+    severity: str,
+    description: str,
+    suggested_fix: str = "",
+    codebase_id: str = "",
+) -> str:
+    """
+    File a structured report during an agent integration test session.
+
+    Use this throughout the session whenever you notice something broken,
+    confusing, improvable, or working well. Reports go to a separate table
+    (not user feedback) and are reviewed by the CodeBrain team.
+
+    Args:
+        run_id: The test run ID provided in your instructions.
+        report_type: "bug" | "ux" | "suggestion" | "fix-idea" | "passing"
+        severity: "low" | "medium" | "high" | "critical"
+        description: Clear description of what you observed and why it matters.
+        suggested_fix: Your idea for how to fix it. Do NOT implement — just describe.
+        codebase_id: Leave blank to auto-detect.
+    """
+    try:
+        result = _post("agent-test-report", {
+            "run_id": run_id,
+            "report_type": report_type,
+            "severity": severity,
+            "description": description,
+            "suggested_fix": suggested_fix,
+            "codebase_id": codebase_id,
+        })
+    except Exception as e:
+        return _fmt_err(e)
+    if result.get("ok"):
+        return f"Test report filed (id={result.get('id', '?')}, type={report_type}, severity={severity})."
+    return f"Report submission failed: {result}"
+
+
+@mcp.tool()
 def get_jit_context(description: str, codebase_id: str = "", user_id: int = 0) -> str:
     """
     Get Just-In-Time learning context for what the user plans to work on.
