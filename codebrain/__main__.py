@@ -710,13 +710,18 @@ def _write_global_claude_md() -> bool:
 
 # ── .mcp.json generators ──────────────────────────────────────────────────────
 
-def _make_mcp_json(url: str, api_key: str) -> dict:
-    """Generate .mcp.json pointing to the codebrain client's MCP server."""
+def _make_mcp_json(url: str, api_key: str, python_path: str | None = None) -> dict:
+    """Generate .mcp.json with explicit Python path for reliable Electron launch.
+
+    Uses sys.executable by default so Claude Code bypasses PATH resolution entirely —
+    avoids the Electron partial-PATH problem where 'codebrain' isn't findable.
+    """
+    cmd = python_path if python_path is not None else sys.executable
     return {
         "mcpServers": {
             "codebrain": {
-                "command": "codebrain",
-                "args": ["mcp"],
+                "command": cmd,
+                "args": ["-m", "codebrain", "mcp"],
                 "env": {
                     "CODEBRAIN_URL": url,
                     "CODEBRAIN_API_KEY": api_key,
@@ -727,27 +732,22 @@ def _make_mcp_json(url: str, api_key: str) -> dict:
 
 
 def _make_mcp_json_template(url: str) -> str:
-    """Template teammates fill in — URL is pre-filled, they supply their own API key."""
-    template = {
-        "mcpServers": {
-            "codebrain": {
-                "command": "codebrain",
-                "args": ["mcp"],
-                "env": {
-                    "CODEBRAIN_URL": url,
-                    "CODEBRAIN_API_KEY": "<your-api-key>",
-                },
-            }
-        }
-    }
-    lines = json.dumps(template, indent=2).splitlines()
-    annotated = []
-    for line in lines:
-        if '"<your-api-key>"' in line:
-            annotated.append(line + "  // get from webapp: Settings -> API Key")
-        else:
-            annotated.append(line)
-    return "\n".join(annotated) + "\n"
+    """Template teammates fill in — URL is pre-filled, they supply their Python path + API key."""
+    lines = [
+        "{",
+        '  "mcpServers": {',
+        '    "codebrain": {',
+        '      "command": "<path-to-your-python>",  // run: python -c "import sys; print(sys.executable)"',
+        '      "args": ["-m", "codebrain", "mcp"],',
+        '      "env": {',
+        f'        "CODEBRAIN_URL": "{url}",',
+        '        "CODEBRAIN_API_KEY": "<your-api-key>"  // get from webapp: Settings -> API Key',
+        "      }",
+        "    }",
+        "  }",
+        "}",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1465,6 +1465,19 @@ def cmd_up(args: argparse.Namespace) -> int:
         print("No .codebrain config found. Run 'codebrain init --url <url> --api-key <key> --name <name>' first.")
         return 1
 
+    # Detect broken .mcp.json path (e.g. venv was moved/recreated)
+    mcp_path = Path(".mcp.json")
+    if mcp_path.exists():
+        try:
+            mcp_cfg = json.loads(mcp_path.read_text(encoding="utf-8"))
+            mcp_cmd = mcp_cfg.get("mcpServers", {}).get("codebrain", {}).get("command", "")
+            if mcp_cmd and mcp_cmd != "codebrain" and not Path(mcp_cmd).exists():
+                print(f"  WARNING: .mcp.json points to a Python path that no longer exists:")
+                print(f"    {mcp_cmd}")
+                print("  Run: codebrain upgrade  to update it to your current Python path.")
+        except Exception:
+            pass
+
     print(f"Connecting to CodeBrain at {url} ...", flush=True)
     try:
         import httpx
@@ -1476,6 +1489,8 @@ def cmd_up(args: argparse.Namespace) -> int:
             from .mcp_server_http import CLIENT_VERSION
         except ImportError:
             CLIENT_VERSION = "1"
+            print("  WARNING: Wrong package installed — 'codebrain' on PyPI is a different tool.")
+            print("  Run: pip uninstall codebrain && pip install git+https://github.com/DawerJ/CodeBrain-CLI.git")
         if server_version != CLIENT_VERSION:
             print(f"  Version mismatch: local package is v{CLIENT_VERSION}, server expects v{server_version}")
             print(f"     Run: pip install --upgrade git+https://github.com/DawerJ/CodeBrain-CLI.git  then restart Claude Code")
@@ -1563,14 +1578,18 @@ def cmd_upgrade() -> int:
         try:
             mcp_cfg = json.loads(mcp_path.read_text(encoding="utf-8"))
             cb = mcp_cfg.get("mcpServers", {}).get("codebrain", {})
-            # Only migrate old HTTP/SSE transport configs — leave custom stdio configs alone.
-            # A working custom command (e.g. run_mcp.py path) should survive upgrade.
-            needs_patch = "url" in cb or cb.get("type") == "sse"
+            # Migrate: old HTTP/SSE transport OR generic "codebrain" command (no explicit path).
+            # A custom absolute path (e.g. /path/to/python.exe) survives unchanged.
+            needs_patch = (
+                "url" in cb
+                or cb.get("type") == "sse"
+                or cb.get("command") == "codebrain"
+            )
             if needs_patch and ("CODEBRAIN_URL" in cb.get("env", {}) or url):
                 cb_env = cb.get("env", {})
                 mcp_cfg.setdefault("mcpServers", {})["codebrain"] = {
-                    "command": "codebrain",
-                    "args": ["mcp"],
+                    "command": sys.executable,
+                    "args": ["-m", "codebrain", "mcp"],
                     "env": {
                         "CODEBRAIN_URL": cb_env.get("CODEBRAIN_URL", url),
                         "CODEBRAIN_API_KEY": cb_env.get("CODEBRAIN_API_KEY", api_key),
