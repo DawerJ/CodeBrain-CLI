@@ -1451,7 +1451,10 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_up(args: argparse.Namespace) -> int:
-    from .config import load as _load_cfg
+    from .config import load as _load_cfg, migrate as _migrate_cfg
+
+    if _migrate_cfg():
+        print("  Migrated .codebrain file → .codebrain/ directory (session.md can now be written)")
 
     cfg = _load_cfg()
     url = cfg.get("url") or ""
