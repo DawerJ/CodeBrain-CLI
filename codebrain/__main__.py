@@ -2282,9 +2282,14 @@ def main() -> None:
             import asyncio, io
             asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
             # Electron sets PYTHONUNBUFFERED=1, leaving stdout as raw FileIO.
-            # MCP stdio transport requires buffered output or messages are fragmented.
-            if hasattr(sys.stdout, "buffer") and not isinstance(sys.stdout.buffer, io.BufferedWriter):
-                sys.stdout = io.TextIOWrapper(io.BufferedWriter(sys.stdout.buffer), encoding="utf-8")
+            # MCP stdio requires line-buffered output — flush after each \n so
+            # JSON-RPC responses are sent immediately. Block buffering (BufferedWriter)
+            # causes deadlock when used as a subprocess: responses sit in buffer until
+            # it fills, never reaching the reader.
+            if hasattr(sys.stdout, "buffer"):
+                sys.stdout = io.TextIOWrapper(
+                    sys.stdout.buffer, encoding="utf-8", line_buffering=True
+                )
         from .mcp_server_http import mcp as _mcp
         _mcp.run()
     elif args.command == "up":
