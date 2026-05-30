@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "3"
+CLIENT_VERSION = "4"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -118,7 +118,7 @@ def _write_session_file(sessions: list, codebase_id: str, codebase_name: str = "
 
     try:
         branch = subprocess.check_output(
-            ["git", "branch", "--show-current"], stderr=subprocess.DEVNULL
+            ["git", "branch", "--show-current"], stderr=subprocess.DEVNULL, timeout=3
         ).decode().strip()
     except Exception:
         branch = "unknown"
@@ -126,7 +126,7 @@ def _write_session_file(sessions: list, codebase_id: str, codebase_name: str = "
     # Resolve project root so the file lands in the right place regardless of MCP server cwd
     try:
         project_root = subprocess.check_output(
-            ["git", "rev-parse", "--show-toplevel"], stderr=subprocess.DEVNULL
+            ["git", "rev-parse", "--show-toplevel"], stderr=subprocess.DEVNULL, timeout=3
         ).decode().strip()
     except Exception:
         project_root = os.getcwd()
@@ -321,13 +321,18 @@ def get_session_context(codebase_id: str = "") -> str:
                 "Skip anything ambiguous — a wrong assignment is worse than none."
             )
 
-    # Write full session history to .codebrain/session.md as a side effect
-    try:
-        cb_name = data.get("codebase_name", "")
-        design_notes = data.get("design_notes") or []
-        _write_session_file(sessions, data.get("codebase_id", codebase_id), cb_name, design_notes)
-    except Exception:
-        pass  # never block the session start on a file write failure
+    # Write full session history to .codebrain/session.md as a side effect.
+    # Run in a background thread — subprocess calls inside can hang on Windows
+    # Electron pipes if git inherits the MCP stdio handles; never block the tool call.
+    import threading as _threading
+    def _bg_write():
+        try:
+            cb_name = data.get("codebase_name", "")
+            design_notes = data.get("design_notes") or []
+            _write_session_file(sessions, data.get("codebase_id", codebase_id), cb_name, design_notes)
+        except Exception:
+            pass
+    _threading.Thread(target=_bg_write, daemon=True).start()
 
     return "\n".join(lines)
 
