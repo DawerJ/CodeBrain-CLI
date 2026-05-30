@@ -640,9 +640,10 @@ def rescan_stale(codebase_id: str = "") -> str:
                     "file_path": cu.file_path,
                     "source": cu.source,
                     "source_hash": cu.source_hash,
-                    "cyclomatic_complexity": cu.cyclomatic_complexity,
-                    "criticality_score": cu.criticality_score,
                     "profile_name": cu.assessment_profile.name,
+                    # cyclomatic_complexity/criticality_score omitted so server
+                    # COALESCE preserves existing values on update and uses
+                    # defaults on insert
                 })
         except Exception:
             pass
