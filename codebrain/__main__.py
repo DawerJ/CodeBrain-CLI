@@ -2164,6 +2164,11 @@ def main() -> None:
     elif args.command == "ci":
         sys.exit(cmd_ci(force=getattr(args, "force", False)))
     elif args.command == "mcp":
+        # Windows ProactorEventLoop (default in Python 3.8+) is incompatible with
+        # stdio pipes used by Claude Code / Electron. SelectorEventLoop works correctly.
+        if sys.platform == "win32":
+            import asyncio
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         from .mcp_server_http import mcp as _mcp
         _mcp.run()
     elif args.command == "up":
