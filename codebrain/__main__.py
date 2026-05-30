@@ -2283,12 +2283,14 @@ def main() -> None:
             asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
             # Electron sets PYTHONUNBUFFERED=1, leaving stdout as raw FileIO.
             # MCP stdio requires line-buffered output — flush after each \n so
-            # JSON-RPC responses are sent immediately. Block buffering (BufferedWriter)
-            # causes deadlock when used as a subprocess: responses sit in buffer until
-            # it fills, never reaching the reader.
-            if hasattr(sys.stdout, "buffer"):
+            # JSON-RPC responses are sent immediately.
+            # IMPORTANT: use detach() not .buffer — detach safely hands off ownership
+            # of the underlying file descriptor so the old TextIOWrapper doesn't close
+            # it on garbage collection (which would make FastMCP's stdio_server() fail
+            # with "I/O operation on closed file").
+            if hasattr(sys.stdout, "detach"):
                 sys.stdout = io.TextIOWrapper(
-                    sys.stdout.buffer, encoding="utf-8", line_buffering=True
+                    sys.stdout.detach(), encoding="utf-8", line_buffering=True
                 )
         from .mcp_server_http import mcp as _mcp
         _mcp.run()
