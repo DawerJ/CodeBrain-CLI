@@ -1693,6 +1693,57 @@ def cmd_concepts(args: argparse.Namespace) -> int:
                 print(f"Failed: {data}")
             return 0
 
+        elif sub == "normalize":
+            import re as _re
+            path = getattr(args, "path", ".") or "."
+            apply = getattr(args, "apply", False)
+            from .scanner import scan_concept_refs
+            print(f"Scanning {path} for @concept: references ...", flush=True)
+            refs = scan_concept_refs(path)
+            if not refs:
+                print("No @concept: references found.")
+                return 0
+            print(f"Found {len(refs)} unique concept references. Checking for synonyms ...", flush=True)
+            payload = _json.dumps({"codebase_id": codebase_id, "concept_names": list(refs.keys())}).encode()
+            request = _req.Request(f"{url}/api/v1/concepts/gaps", data=payload, headers=headers, method="POST")
+            with _req.urlopen(request, timeout=30) as resp:
+                data = _json.loads(resp.read())
+            synonyms = data.get("synonyms", [])
+            if not synonyms:
+                print("All @concept: tags match canonical names. Nothing to normalize.")
+                return 0
+            print(f"\nFound {len(synonyms)} synonym(s) to normalize:")
+            for s in synonyms:
+                locs = refs.get(s["name"], [])
+                print(f"  '{s['name']}' → '{s['existing_name']}' ({s['reason']})")
+                for loc in locs[:3]:
+                    print(f"    {loc}")
+            if not apply:
+                print(f"\nRun with --apply to patch source files.")
+                return 0
+            # Apply corrections: rewrite @concept: tags in source files
+            patched_files = 0
+            for s in synonyms:
+                original, canonical = s["name"], s["existing_name"]
+                for loc in refs.get(original, []):
+                    file_path = loc.split(":")[0]
+                    try:
+                        text = open(file_path, encoding="utf-8").read()
+                        # Match @concept: lines containing the original name
+                        pattern = _re.compile(
+                            r'(@concept:\s*)(.*?\b)' + _re.escape(original) + r'(\b.*)',
+                            _re.MULTILINE,
+                        )
+                        new_text = pattern.sub(lambda m: m.group(1) + m.group(2) + canonical + m.group(3), text)
+                        if new_text != text:
+                            open(file_path, "w", encoding="utf-8").write(new_text)
+                            patched_files += 1
+                            print(f"  Patched {file_path}")
+                    except Exception as e:
+                        print(f"  Warning: could not patch {file_path}: {e}")
+            print(f"\nDone — {patched_files} file(s) updated.")
+            return 0
+
         elif sub == "gaps":
             from .scanner import scan_concept_refs
             path = getattr(args, "path", ".") or "."
@@ -2375,8 +2426,8 @@ def main() -> None:
     p_concepts = sub.add_parser("concepts", help="Concept graph curation tools")
     p_concepts.add_argument(
         "subcommand",
-        choices=["gaps", "audit", "edges", "embed", "approve"],
-        help="gaps: find missing concepts | audit: review quality | edges: check prerequisite coverage | embed: generate missing embeddings | approve: promote a concept into the graph",
+        choices=["gaps", "audit", "edges", "embed", "approve", "normalize"],
+        help="gaps: find missing concepts | audit: review quality | edges: check prerequisite coverage | embed: generate missing embeddings | approve: promote a concept into the graph | normalize: fix @concept: tags that use synonym names",
     )
     p_concepts.add_argument("--path", default=".", help="Source directory to scan (gaps only, default: .)")
     p_concepts.add_argument("--level", default=None, type=int, help="Filter by concept level 0-3 (audit only, or level for approve)")
@@ -2384,6 +2435,7 @@ def main() -> None:
     p_concepts.add_argument("--description", default="", help="Concept description (approve only)")
     p_concepts.add_argument("--suggestion-id", default="", dest="suggestion_id", help="Suggestion ID to approve (approve only)")
     p_concepts.add_argument("--universal", action="store_true", default=False, help="Mark as universal concept (approve only)")
+    p_concepts.add_argument("--apply", action="store_true", default=False, help="Apply corrections to source files (normalize only)")
 
     # test
     p_test = sub.add_parser("test", help="Run agent integration tests against CodeBrain")
