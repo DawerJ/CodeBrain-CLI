@@ -1649,6 +1649,130 @@ def cmd_ci(force: bool = False) -> int:
     return 0
 
 
+def cmd_concepts(args: argparse.Namespace) -> int:
+    from .config import load as _load_cfg
+    import json as _json
+
+    cfg = _load_cfg() or {}
+    url = (os.environ.get("CODEBRAIN_URL") or cfg.get("url", "")).rstrip("/")
+    api_key = os.environ.get("CODEBRAIN_API_KEY") or cfg.get("api_key", "")
+    codebase_id = os.environ.get("CODEBRAIN_CODEBASE_ID") or cfg.get("codebase_id", "")
+
+    if not url or not api_key:
+        print("Error: need CODEBRAIN_URL and CODEBRAIN_API_KEY (or run `codebrain up` first)")
+        return 1
+
+    headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+    sub = args.subcommand
+
+    try:
+        import urllib.request as _req
+
+        if sub == "approve":
+            name = getattr(args, "name", "") or ""
+            if not name:
+                print("Error: --name is required for approve")
+                return 1
+            payload = _json.dumps({
+                "codebase_id": codebase_id,
+                "name": name,
+                "description": getattr(args, "description", "") or "",
+                "level": getattr(args, "level", 1) or 1,
+                "is_universal": getattr(args, "universal", False),
+                "suggestion_id": getattr(args, "suggestion_id", "") or "",
+            }).encode()
+            request = _req.Request(f"{url}/api/v1/concepts/approve", data=payload, headers=headers, method="POST")
+            with _req.urlopen(request, timeout=30) as resp:
+                data = _json.loads(resp.read())
+            if data.get("existing"):
+                print(f"'{name}' already in concept graph (node {data.get('node_id', '?')}).")
+            elif data.get("ok"):
+                scope = "universal" if getattr(args, "universal", False) else f"codebase {codebase_id}"
+                print(f"Approved: '{name}' added to concept graph ({scope}, L{getattr(args, 'level', 1)}).")
+            else:
+                print(f"Failed: {data}")
+            return 0
+
+        elif sub == "gaps":
+            from .scanner import scan_concept_refs
+            path = getattr(args, "path", ".") or "."
+            print(f"Scanning {path} for @concept: references ...", flush=True)
+            refs = scan_concept_refs(path)
+            if not refs:
+                print("No @concept: references found.")
+                return 0
+            print(f"Found {len(refs)} unique concept references. Checking against graph ...", flush=True)
+            payload = _json.dumps({"codebase_id": codebase_id, "concept_names": list(refs.keys())}).encode()
+            request = _req.Request(f"{url}/api/v1/concepts/gaps", data=payload, headers=headers, method="POST")
+            with _req.urlopen(request, timeout=30) as resp:
+                data = _json.loads(resp.read())
+
+            gaps = data.get("gaps", [])
+            synonyms = data.get("synonyms", [])
+            existing = data.get("existing", [])
+
+            print(f"\n{'='*60}")
+            print(f"GAPS ({len(gaps)}) — concepts referenced in code but missing from graph:")
+            for name in gaps:
+                locs = refs.get(name, [])
+                print(f"  + {name}")
+                for loc in locs[:3]:
+                    print(f"      {loc}")
+
+            if synonyms:
+                print(f"\nSYNONYMS ({len(synonyms)}) — referenced names that match existing concepts:")
+                for s in synonyms:
+                    print(f"  ~ {s['name']} → {s['existing_name']} ({s['reason']})")
+
+            print(f"\nAlready in graph: {len(existing)}")
+            return 0
+
+        elif sub == "audit":
+            level_param = f"&level={args.level}" if args.level is not None else ""
+            request = _req.Request(
+                f"{url}/api/v1/concepts/audit?codebase_id={codebase_id}{level_param}",
+                headers=headers,
+            )
+            with _req.urlopen(request, timeout=60) as resp:
+                data = _json.loads(resp.read())
+
+            issues = data.get("issues", [])
+            print(f"Reviewed {data.get('nodes_reviewed', '?')} nodes. Found {len(issues)} issues:\n")
+            for issue in issues:
+                print(f"  [{issue.get('issue', '?').upper()}] \"{issue.get('name', '?')}\"")
+                print(f"    → {issue.get('suggestion', '')}")
+            return 0
+
+        elif sub == "edges":
+            request = _req.Request(
+                f"{url}/api/v1/concepts/edges?codebase_id={codebase_id}",
+                headers=headers,
+            )
+            with _req.urlopen(request, timeout=60) as resp:
+                data = _json.loads(resp.read())
+
+            missing = data.get("missing", [])
+            print(f"Orphan nodes (no prerequisites): {data.get('orphan_count', 0)}")
+            print(f"Suggested edges: {len(missing)}\n")
+            for m in missing:
+                print(f"  {m.get('prereq_name', '?')} → {m.get('orphan_name', '?')}")
+                print(f"    reason: {m.get('reason', '')}")
+            return 0
+
+        elif sub == "embed":
+            print("Generating embeddings for concept nodes missing them ...", flush=True)
+            payload = _json.dumps({"codebase_id": codebase_id}).encode()
+            request = _req.Request(f"{url}/api/v1/concepts/embed", data=payload, headers=headers, method="POST")
+            with _req.urlopen(request, timeout=300) as resp:
+                data = _json.loads(resp.read())
+            print(f"Done — {data.get('embedded', 0)} nodes embedded.")
+            return 0
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+
 def cmd_rescan(args: argparse.Namespace) -> int:
     from .config import load as _load_cfg
 
@@ -2247,6 +2371,20 @@ def main() -> None:
     p_rescan.add_argument("--codebase-id", default=None, dest="codebase_id",
                           help="Codebase ID (falls back to .codebrain or CODEBRAIN_CODEBASE_ID env)")
 
+    # concepts
+    p_concepts = sub.add_parser("concepts", help="Concept graph curation tools")
+    p_concepts.add_argument(
+        "subcommand",
+        choices=["gaps", "audit", "edges", "embed", "approve"],
+        help="gaps: find missing concepts | audit: review quality | edges: check prerequisite coverage | embed: generate missing embeddings | approve: promote a concept into the graph",
+    )
+    p_concepts.add_argument("--path", default=".", help="Source directory to scan (gaps only, default: .)")
+    p_concepts.add_argument("--level", default=None, type=int, help="Filter by concept level 0-3 (audit only, or level for approve)")
+    p_concepts.add_argument("--name", default=None, help="Concept name to approve (approve only)")
+    p_concepts.add_argument("--description", default="", help="Concept description (approve only)")
+    p_concepts.add_argument("--suggestion-id", default="", dest="suggestion_id", help="Suggestion ID to approve (approve only)")
+    p_concepts.add_argument("--universal", action="store_true", default=False, help="Mark as universal concept (approve only)")
+
     # test
     p_test = sub.add_parser("test", help="Run agent integration tests against CodeBrain")
     p_test.add_argument("--mode", choices=["sandbox", "prod"], default="sandbox")
@@ -2302,6 +2440,8 @@ def main() -> None:
         sys.exit(cmd_demo(args))
     elif args.command == "delete-demo":
         sys.exit(cmd_delete_demo(args))
+    elif args.command == "concepts":
+        sys.exit(cmd_concepts(args))
     elif args.command == "test":
         sys.exit(cmd_test(args))
     elif args.command == "test-results":
