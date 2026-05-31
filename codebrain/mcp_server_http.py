@@ -796,10 +796,11 @@ def push_learn_content(
     function_name: str,
     explanation: str,
     code_flow: str = "",
-    key_concepts: list[str] | None = None,
+    concepts: list[dict] | None = None,
     gotchas: list[str] | None = None,
     file_path: str = "",
     codebase_id: str = "",
+    key_concepts: list[str] | None = None,
 ) -> str:
     """
     Provide a plain-English explanation of a function — skips the LLM pipeline.
@@ -811,25 +812,35 @@ def push_learn_content(
         function_name: Exact function name.
         explanation: What it does and why it exists.
         code_flow: Step-by-step execution description.
-        key_concepts: Domain concepts needed to understand this function.
+        concepts: Rich concept list. Each: {name, level (0-3), description, universal, prereqs}.
+                  Auto-promoted into graph and linked to this function.
         gotchas: Subtle things that trip up new contributors.
         file_path: Source file path (e.g. "src/scraper.py"). Helps if not yet scanned.
         codebase_id: Leave blank to use the first available codebase.
+        key_concepts: Deprecated — use concepts instead.
     """
+    effective_concepts = concepts or []
+    if not effective_concepts and key_concepts:
+        effective_concepts = [{"name": k, "level": 1} for k in key_concepts if k]
+
     try:
         data = _post("learn-content", {
             "codebase_id": codebase_id,
             "function_name": function_name,
             "explanation": explanation,
             "code_flow": code_flow,
-            "key_concepts": key_concepts or [],
+            "concepts": effective_concepts,
+            "key_concepts": [c.get("name", c) if isinstance(c, dict) else c
+                             for c in effective_concepts],
             "gotchas": gotchas or [],
             "file_path": file_path,
         })
     except Exception as e:
         return _fmt_err(e)
     stub_note = " (stub registered — will link to real source after rescan)" if data.get("stub") else ""
-    return f"Learn content saved for '{function_name}'{stub_note}."
+    canonical = data.get("canonical_updates") or {}
+    corrections = f" Canonical corrections: {canonical}." if canonical else ""
+    return f"Learn content saved for '{function_name}'{stub_note}.{corrections}"
 
 
 @mcp.tool()
