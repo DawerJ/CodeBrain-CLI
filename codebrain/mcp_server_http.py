@@ -60,15 +60,22 @@ mcp = FastMCP(
 )
 
 
+def _client() -> "httpx.Client":
+    # Fresh client per call — avoids Windows ProactorEventLoop connection-pool
+    # hang where the second request on a reused socket stalls indefinitely when
+    # the MCP tool runs inside asyncio run_in_executor.
+    return httpx.Client(timeout=30)
+
+
 def _get(path: str, **params) -> Any:
     if not _BASE_URL:
         return {"error": "CODEBRAIN_URL not set. Run `codebrain init` first."}
-    r = httpx.get(
-        f"{_BASE_URL}/api/v1/{path}",
-        params={k: v for k, v in params.items() if v is not None},
-        headers={"X-API-Key": _API_KEY},
-        timeout=30,
-    )
+    with _client() as c:
+        r = c.get(
+            f"{_BASE_URL}/api/v1/{path}",
+            params={k: v for k, v in params.items() if v is not None},
+            headers={"X-API-Key": _API_KEY},
+        )
     r.raise_for_status()
     return r.json()
 
@@ -76,12 +83,12 @@ def _get(path: str, **params) -> Any:
 def _post(path: str, body: dict) -> Any:
     if not _BASE_URL:
         return {"error": "CODEBRAIN_URL not set. Run `codebrain init` first."}
-    r = httpx.post(
-        f"{_BASE_URL}/api/v1/{path}",
-        json=body,
-        headers={"X-API-Key": _API_KEY, "Content-Type": "application/json"},
-        timeout=30,
-    )
+    with _client() as c:
+        r = c.post(
+            f"{_BASE_URL}/api/v1/{path}",
+            json=body,
+            headers={"X-API-Key": _API_KEY, "Content-Type": "application/json"},
+        )
     r.raise_for_status()
     return r.json()
 
@@ -89,12 +96,12 @@ def _post(path: str, body: dict) -> Any:
 def _put(path: str, body: dict) -> Any:
     if not _BASE_URL:
         return {"error": "CODEBRAIN_URL not set. Run `codebrain init` first."}
-    r = httpx.put(
-        f"{_BASE_URL}/api/v1/{path}",
-        json=body,
-        headers={"X-API-Key": _API_KEY, "Content-Type": "application/json"},
-        timeout=30,
-    )
+    with _client() as c:
+        r = c.put(
+            f"{_BASE_URL}/api/v1/{path}",
+            json=body,
+            headers={"X-API-Key": _API_KEY, "Content-Type": "application/json"},
+        )
     r.raise_for_status()
     return r.json()
 
@@ -1190,12 +1197,11 @@ def release_work(claim_id: str, codebase_id: str = "") -> str:
         codebase_id: Leave blank to use the first available codebase.
     """
     try:
-        import httpx as _httpx
-        r = _httpx.delete(
-            f"{_BASE_URL}/api/v1/work-claims/{claim_id}",
-            headers={"X-API-Key": _API_KEY},
-            timeout=15,
-        )
+        with _client() as c:
+            r = c.delete(
+                f"{_BASE_URL}/api/v1/work-claims/{claim_id}",
+                headers={"X-API-Key": _API_KEY},
+            )
         r.raise_for_status()
         data = r.json()
     except Exception as e:
