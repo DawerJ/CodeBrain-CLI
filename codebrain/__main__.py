@@ -1561,9 +1561,13 @@ def cmd_upgrade() -> int:
             path.write_text(new_content, encoding="utf-8")
             updated.append(str(path))
 
-    # CLAUDE.md: server may serve back a per-codebase stored version (pushed via
-    # `codebrain push-claude-md`). Only overwrite if local matches the current server
-    # version exactly — if local has additions, skip and prompt to push instead.
+    # CLAUDE.md: use template hash stamps (<!-- codebrain-template: HASH -->) to decide.
+    # The hash identifies which server template version the local file was built on.
+    # This is safer than set/line comparison which is order-sensitive and fragile.
+    #
+    # NOTE: proper 3-way merge (server template changed AND local has additions) is a
+    # deeper problem — see annotation in CodeBrain for the design work still needed.
+    from codeownership.__main__ import extract_template_stamp  # type: ignore
     server_claude = _fetch_template(url, api_key, "CLAUDE.md", codebase_id, codebase_name)
     local_claude_path = Path("CLAUDE.md")
     local_claude = local_claude_path.read_text(encoding="utf-8") if local_claude_path.exists() else None
@@ -1572,15 +1576,26 @@ def cmd_upgrade() -> int:
         updated.append("CLAUDE.md")
     elif local_claude == server_claude:
         skipped.append("CLAUDE.md")
-    elif set(server_claude.splitlines()).issubset(set(local_claude.splitlines())):
-        # Local has everything the server has plus additions — safe, skip overwrite
-        skipped.append("CLAUDE.md (local has additions — run `codebrain push-claude-md` to sync to server)")
     else:
-        # Server has new content local doesn't — overwrite but warn about potential loss
-        print("  ⚠️  CLAUDE.md: server has new content. Updating (local additions may be lost).")
-        print("     Run `codebrain push-claude-md` after to re-sync your additions.")
-        local_claude_path.write_text(server_claude, encoding="utf-8")
-        updated.append("CLAUDE.md")
+        try:
+            server_hash, _ = extract_template_stamp(server_claude)
+            local_hash, _ = extract_template_stamp(local_claude)
+        except Exception:
+            server_hash = local_hash = ""
+
+        if local_hash and local_hash == server_hash:
+            # Same template base — local has additions beyond it. Preserve.
+            skipped.append("CLAUDE.md (has local additions — run `codebrain push-claude-md` to sync to server)")
+        elif not local_hash:
+            # No stamp in local file — unknown origin, don't overwrite
+            skipped.append("CLAUDE.md (no template stamp found — skipped to avoid losing content)")
+        else:
+            # Server template has genuinely changed (different hash). Overwrite.
+            # TODO: 3-way merge — preserve local additions while applying server changes.
+            print("  ⚠️  CLAUDE.md: server template has changed. Updating.")
+            print("     If you had local additions, re-run `codebrain push-claude-md` after.")
+            local_claude_path.write_text(server_claude, encoding="utf-8")
+            updated.append("CLAUDE.md")
 
     commands_dir = Path(".claude") / "commands"
     commands_dir.mkdir(parents=True, exist_ok=True)
