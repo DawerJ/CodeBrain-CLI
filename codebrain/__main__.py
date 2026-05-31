@@ -1561,7 +1561,26 @@ def cmd_upgrade() -> int:
             path.write_text(new_content, encoding="utf-8")
             updated.append(str(path))
 
-    _write_if_changed(Path("CLAUDE.md"), _fetch_template(url, api_key, "CLAUDE.md", codebase_id, codebase_name))
+    # CLAUDE.md: server may serve back a per-codebase stored version (pushed via
+    # `codebrain push-claude-md`). Only overwrite if local matches the current server
+    # version exactly — if local has additions, skip and prompt to push instead.
+    server_claude = _fetch_template(url, api_key, "CLAUDE.md", codebase_id, codebase_name)
+    local_claude_path = Path("CLAUDE.md")
+    local_claude = local_claude_path.read_text(encoding="utf-8") if local_claude_path.exists() else None
+    if local_claude is None:
+        local_claude_path.write_text(server_claude, encoding="utf-8")
+        updated.append("CLAUDE.md")
+    elif local_claude == server_claude:
+        skipped.append("CLAUDE.md")
+    elif set(server_claude.splitlines()).issubset(set(local_claude.splitlines())):
+        # Local has everything the server has plus additions — safe, skip overwrite
+        skipped.append("CLAUDE.md (local has additions — run `codebrain push-claude-md` to sync to server)")
+    else:
+        # Server has new content local doesn't — overwrite but warn about potential loss
+        print("  ⚠️  CLAUDE.md: server has new content. Updating (local additions may be lost).")
+        print("     Run `codebrain push-claude-md` after to re-sync your additions.")
+        local_claude_path.write_text(server_claude, encoding="utf-8")
+        updated.append("CLAUDE.md")
 
     commands_dir = Path(".claude") / "commands"
     commands_dir.mkdir(parents=True, exist_ok=True)
@@ -1617,6 +1636,49 @@ def cmd_upgrade() -> int:
         print("Commit the updated files: git add CLAUDE.md .mcp.json .claude/ && git commit -m 'chore: upgrade codebrain client files'")
     else:
         print("\nEverything is already up to date.")
+
+    return 0
+
+
+def cmd_push_claude_md(args: argparse.Namespace) -> int:
+    """Push the local CLAUDE.md to the server so `codebrain upgrade` never overwrites it."""
+    from .config import load as _load_cfg
+    import urllib.request as _req
+
+    cfg = _load_cfg() or {}
+    url = (os.environ.get("CODEBRAIN_URL") or cfg.get("url", "")).rstrip("/")
+    api_key = os.environ.get("CODEBRAIN_API_KEY") or cfg.get("api_key", "")
+    codebase_id = os.environ.get("CODEBRAIN_CODEBASE_ID") or cfg.get("codebase_id", "")
+
+    if not url or not api_key or not codebase_id:
+        print("Error: need CODEBRAIN_URL, CODEBRAIN_API_KEY, and codebase_id (run `codebrain up` first)")
+        return 1
+
+    claude_path = Path("CLAUDE.md")
+    if not claude_path.exists():
+        print("No CLAUDE.md found in current directory.")
+        return 1
+
+    content = claude_path.read_text(encoding="utf-8")
+    payload = _json.dumps({"content": content}).encode()
+    headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+
+    try:
+        request = _req.Request(
+            f"{url}/api/v1/client-template?template=CLAUDE.md&codebase_id={codebase_id}",
+            data=payload, headers=headers, method="PUT",
+        )
+        with _req.urlopen(request, timeout=30) as resp:
+            data = _json.loads(resp.read())
+        if data.get("ok"):
+            print(f"CLAUDE.md pushed to server for codebase {codebase_id}.")
+            print("Future `codebrain upgrade` runs will fetch this version — your additions are safe.")
+        else:
+            print(f"Server error: {data}")
+            return 1
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
 
     return 0
 
@@ -2412,6 +2474,11 @@ def main() -> None:
                       help="Start a file watcher that notifies CodeBrain on .py file saves")
 
     # rescan
+    sub.add_parser(
+        "push-claude-md",
+        help="Push local CLAUDE.md to server so codebrain upgrade never overwrites your additions",
+    )
+
     p_rescan = sub.add_parser(
         "rescan",
         help="Scan source files and push changed code units to CodeBrain (used by CI)",
@@ -2463,6 +2530,8 @@ def main() -> None:
         sys.exit(cmd_init(args))
     elif args.command == "upgrade":
         sys.exit(cmd_upgrade())
+    elif args.command == "push-claude-md":
+        sys.exit(cmd_push_claude_md(args))
     elif args.command == "ci":
         sys.exit(cmd_ci(force=getattr(args, "force", False)))
     elif args.command == "mcp":
