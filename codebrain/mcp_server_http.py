@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "8"
+CLIENT_VERSION = "9"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -482,6 +482,7 @@ def add_annotation(
     function_name: str = "",
     intent_type: str = "constraint",
     priority: str = "normal",
+    concepts: list[dict] | None = None,
 ) -> str:
     """
     Add an annotation — constraint, decision, warning, or todo.
@@ -492,6 +493,8 @@ def add_annotation(
         function_name: Function to annotate (blank = codebase level).
         intent_type: constraint | decision | warning | todo | note
         priority: normal | high | critical
+        concepts: Optional list of concepts to auto-promote into the concept graph.
+            Each entry: {name, level (1-3), description, universal (bool), prereqs (list[str])}
     """
     try:
         data = _post("annotations", {
@@ -500,6 +503,7 @@ def add_annotation(
             "function_name": function_name,
             "intent_type": intent_type,
             "priority": priority,
+            "concepts": concepts or [],
         })
     except Exception as e:
         return _fmt_err(e)
@@ -722,6 +726,7 @@ def push_session_summary(
     lessons_learned: list[str] | None = None,
     next_session_goals: list[str] | None = None,
     codebase_id: str = "",
+    concepts: list[dict] | None = None,
 ) -> str:
     """
     Push end-of-session summary. Call at the end of every coding session.
@@ -741,6 +746,8 @@ def push_session_summary(
         lessons_learned: What would have been useful to know at the start.
         next_session_goals: What to pick up next session — shown as Resume Point at session start.
         codebase_id: Leave blank to use the first available codebase.
+        concepts: Optional list of concepts to auto-promote into the concept graph.
+            Each entry: {name, level (1-3), description, universal (bool), prereqs (list[str])}
     """
     try:
         data = _post("session-summary", {
@@ -753,6 +760,7 @@ def push_session_summary(
             "discoveries": discoveries or [],
             "lessons_learned": lessons_learned or [],
             "next_session_goals": next_session_goals or [],
+            "concepts": concepts or [],
         })
     except Exception as e:
         return _fmt_err(e)
@@ -767,6 +775,7 @@ def push_module_context(
     owns_tables: list[str] | None = None,
     owns_boundaries: list[str] | None = None,
     codebase_id: str = "",
+    concepts: list[dict] | None = None,
 ) -> str:
     """
     Document a module — applies to all functions in it.
@@ -778,6 +787,8 @@ def push_module_context(
         owns_tables: DB tables this module solely writes.
         owns_boundaries: External service boundaries this module owns.
         codebase_id: Leave blank to use the first available codebase.
+        concepts: Optional list of concepts to auto-promote into the concept graph.
+            Each entry: {name, level (1-3), description, universal (bool), prereqs (list[str])}
     """
     try:
         data = _post("module-context", {
@@ -787,6 +798,7 @@ def push_module_context(
             "invariants": invariants or [],
             "owns_tables": owns_tables or [],
             "owns_boundaries": owns_boundaries or [],
+            "concepts": concepts or [],
         })
     except Exception as e:
         return _fmt_err(e)
@@ -879,6 +891,7 @@ def flag_unknown(
     function_name: str = "",
     impact: str = "unknown",
     codebase_id: str = "",
+    concepts: list[dict] | None = None,
 ) -> str:
     """
     Flag a known unknown for human review.
@@ -888,6 +901,8 @@ def flag_unknown(
         function_name: Function this relates to (optional).
         impact: What could go wrong if this isn't investigated.
         codebase_id: Leave blank to use the first available codebase.
+        concepts: Optional list of concepts to auto-promote into the concept graph.
+            Each entry: {name, level (1-3), description, universal (bool), prereqs (list[str])}
     """
     try:
         data = _post("flag-unknown", {
@@ -895,6 +910,7 @@ def flag_unknown(
             "question": question,
             "function_name": function_name,
             "impact": impact,
+            "concepts": concepts or [],
         })
     except Exception as e:
         return _fmt_err(e)
@@ -959,7 +975,12 @@ def set_feature_mapping(mappings: list[dict], codebase_id: str = "") -> str:
 
 
 @mcp.tool()
-def update_architecture_doc(content: str, codebase_id: str = "", codebase_name: str = "") -> str:
+def update_architecture_doc(
+    content: str,
+    codebase_id: str = "",
+    codebase_name: str = "",
+    concepts: list[dict] | None = None,
+) -> str:
     """
     Replace the codebase architecture document with your own assessment.
 
@@ -967,12 +988,15 @@ def update_architecture_doc(content: str, codebase_id: str = "", codebase_name: 
         content: Markdown architecture document.
         codebase_id: Codebase ID. Leave blank to use the first available codebase.
         codebase_name: Human-readable name (optional).
+        concepts: Optional list of concepts to auto-promote into the concept graph.
+            Each entry: {name, level (1-3), description, universal (bool), prereqs (list[str])}
     """
     try:
         data = _put("architecture", {
             "codebase_id": codebase_id,
             "content": content,
             "codebase_name": codebase_name,
+            "concepts": concepts or [],
         })
     except Exception as e:
         return _fmt_err(e)
