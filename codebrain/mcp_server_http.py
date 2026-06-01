@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "9"
+CLIENT_VERSION = "10"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -623,32 +623,48 @@ def rescan_stale(codebase_id: str = "") -> str:
 
     summary_parts: list[str] = []
 
+    # Collect paths that were in DB but not found locally (for diagnostics)
+    no_file_paths = [r.get("file_path", "<no path>") for r in rows
+                     if r["id"] in no_file_ids] if no_file_ids else []
+
     # Clear flags for DB-flagged items with no local file
     if no_file_ids:
         try:
             res = _post("clear-stale", {"codebase_id": codebase_id, "unit_ids": no_file_ids})
             cleared = res.get("cleared", len(no_file_ids))
-            summary_parts.append(f"{cleared} DB-flagged function(s) cleared (no local file to rescan)")
+            summary_parts.append(
+                f"{cleared} DB-flagged function(s) cleared (file not found locally):"
+            )
+            for p in sorted(set(no_file_paths)):
+                summary_parts.append(f"  {p}")
         except Exception as e:
             summary_parts.append(f"Warning: could not clear {len(no_file_ids)} DB flag(s): {e}")
 
     if not stale_files:
         if summary_parts:
             return "\n".join(summary_parts)
-        return "Nothing stale — no re-ingestion needed."
+        checked = len(rows)
+        return f"Nothing stale — {checked} function(s) checked, all up to date."
 
     # Re-scan stale files and push
     try:
         from .scanner import scan_file, batch_ingest
     except ImportError:
-        n = len(stale_files)
         summary_parts.append(
-            f"Scanner not available — {n} stale file(s) remain flagged. "
-            f"Re-ingestion requires the CI action or TypeScript/JS scanning support."
+            f"Scanner not available — {len(stale_files)} stale file(s) remain flagged.\n"
+            f"Re-ingestion requires the CI action or TypeScript/JS scanning support.\n"
+            f"Stale paths:"
         )
+        for fp in sorted(stale_files):
+            summary_parts.append(f"  {fp}")
         return "\n".join(summary_parts)
 
+    summary_parts.append(f"Rescanning {len(stale_files)} stale file(s):")
+    for fp in sorted(stale_files):
+        summary_parts.append(f"  {fp}")
+
     units_to_push = []
+    scan_errors: list[str] = []
     for fp in stale_files:
         try:
             scan_results = scan_file(fp, include_private=False)
@@ -663,15 +679,19 @@ def rescan_stale(codebase_id: str = "") -> str:
                     # COALESCE preserves existing values on update and uses
                     # defaults on insert
                 })
-        except Exception:
-            pass
+        except Exception as exc:
+            scan_errors.append(f"  {fp}: {exc}")
+
+    if scan_errors:
+        summary_parts.append("Scan errors:")
+        summary_parts.extend(scan_errors)
 
     if not units_to_push:
         exts = {os.path.splitext(fp)[1] for fp in stale_files if os.path.splitext(fp)[1]}
         ext_str = "/".join(sorted(exts)) if exts else "non-Python"
         summary_parts.append(
-            f"{len(stale_files)} stale file(s) found ({ext_str}) — local scanning is not yet "
-            f"supported for these file types. Flags remain set."
+            f"No units extracted ({ext_str} files) — local scanning not yet supported "
+            f"for these types. Stale flags remain set."
         )
         return "\n".join(summary_parts)
 
@@ -681,8 +701,7 @@ def rescan_stale(codebase_id: str = "") -> str:
         return _fmt_err(e)
 
     summary_parts.append(
-        f"Delta re-ingestion complete: "
-        f"{result.get('updated', 0)} updated, {result.get('inserted', 0)} new "
+        f"Done: {result.get('updated', 0)} updated, {result.get('inserted', 0)} new "
         f"across {len(stale_files)} file(s)."
     )
     return "\n".join(summary_parts)
