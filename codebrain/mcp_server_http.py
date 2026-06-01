@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "6"
+CLIENT_VERSION = "7"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -125,7 +125,8 @@ def _write_session_file(sessions: list, codebase_id: str, codebase_name: str = "
 
     try:
         branch = subprocess.check_output(
-            ["git", "branch", "--show-current"], stderr=subprocess.DEVNULL, timeout=3
+            ["git", "branch", "--show-current"],
+            stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=5,
         ).decode().strip()
     except Exception:
         branch = "unknown"
@@ -133,7 +134,8 @@ def _write_session_file(sessions: list, codebase_id: str, codebase_name: str = "
     # Resolve project root so the file lands in the right place regardless of MCP server cwd
     try:
         project_root = subprocess.check_output(
-            ["git", "rev-parse", "--show-toplevel"], stderr=subprocess.DEVNULL, timeout=3
+            ["git", "rev-parse", "--show-toplevel"],
+            stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=5,
         ).decode().strip()
     except Exception:
         project_root = os.getcwd()
