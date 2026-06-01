@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "7"
+CLIENT_VERSION = "8"
 
 mcp = FastMCP(
     "CodeBrain",
