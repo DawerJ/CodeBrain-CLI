@@ -1463,10 +1463,24 @@ def cmd_init(args: argparse.Namespace) -> int:
     print("  Wrote .codebrain (gitignored — contains your API key)")
 
     # Write .mcp.json (gitignored — has credentials + abs paths)
+    # When --force is used on an existing config, preserve the existing command path
+    # so we don't break the MCP server by switching to sys.executable of this binary.
     mcp_path = Path(".mcp.json")
-    if not mcp_path.exists() or args.force:
+    if not mcp_path.exists():
         mcp_path.write_text(json.dumps(_make_mcp_json(url, api_key), indent=2), encoding="utf-8")
         print("  Wrote .mcp.json")
+    elif args.force:
+        try:
+            existing_cmd = json.loads(mcp_path.read_text(encoding="utf-8")).get(
+                "mcpServers", {}
+            ).get("codebrain", {}).get("command")
+        except Exception:
+            existing_cmd = None
+        mcp_path.write_text(
+            json.dumps(_make_mcp_json(url, api_key, python_path=existing_cmd), indent=2),
+            encoding="utf-8",
+        )
+        print("  Wrote .mcp.json (preserved existing command path)")
     _ensure_gitignore(".mcp.json")
 
     # Write .mcp.json.template (safe to commit — placeholder API key)
