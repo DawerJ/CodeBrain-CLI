@@ -30,6 +30,70 @@ import sys
 from pathlib import Path
 
 DEFAULT_URL = "https://codebrain-production.up.railway.app"
+_GITHUB_URL = "git+https://github.com/DawerJ/CodeBrain-CLI.git"
+
+# ── Auto-reinstall ────────────────────────────────────────────────────────────
+
+def _auto_reinstall_package() -> bool:
+    """Try to reinstall the codebrain package from its original install source.
+
+    Tries uv → pipx → pip in order. Returns True if any strategy succeeded.
+    """
+    import subprocess
+    import json as _json
+
+    # Check direct_url.json for the original install source (e.g. local file:// path during dev)
+    install_url = None
+    try:
+        import importlib.metadata as _meta
+        raw = _meta.distribution("codebrain-cli").read_text("direct_url.json")
+        if raw:
+            install_url = _json.loads(raw).get("url")
+    except Exception:
+        pass
+
+    strategies = []
+    if install_url:
+        strategies.append(["uv", "tool", "install", "--reinstall", "--force", install_url])
+    strategies += [
+        ["uv", "tool", "upgrade", "codebrain"],
+        ["uv", "tool", "install", "--reinstall", "--force", _GITHUB_URL],
+        ["pipx", "upgrade", "codebrain"],
+        ["pip", "install", "--upgrade", _GITHUB_URL],
+    ]
+
+    for cmd in strategies:
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if result.returncode == 0:
+                print(f"     Reinstalled via: {' '.join(cmd[:3])}")
+                return True
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+    return False
+
+
+# ── Template stamp helpers ────────────────────────────────────────────────────
+
+_TEMPLATE_STAMP_PREFIX = "<!-- codebrain-template: "
+_TEMPLATE_STAMP_SUFFIX = " -->"
+
+
+def _compute_template_hash(content_without_stamp: str) -> str:
+    import hashlib
+    return hashlib.sha256(content_without_stamp.encode()).hexdigest()[:16]
+
+
+def extract_template_stamp(content: str) -> tuple[str, str]:
+    """Return (stamp_hash, content_without_stamp_line), or ("", content) if none found."""
+    lines = content.splitlines(keepends=True)
+    for i in range(len(lines) - 1, max(len(lines) - 5, -1), -1):
+        line = lines[i].strip()
+        if line.startswith(_TEMPLATE_STAMP_PREFIX) and line.endswith(_TEMPLATE_STAMP_SUFFIX):
+            h = line[len(_TEMPLATE_STAMP_PREFIX):-len(_TEMPLATE_STAMP_SUFFIX)]
+            return h, "".join(lines[:i]) + "".join(lines[i + 1:])
+    return "", content
+
 
 # ── Template generators ───────────────────────────────────────────────────────
 
@@ -1490,10 +1554,21 @@ def cmd_up(args: argparse.Namespace) -> int:
         except ImportError:
             CLIENT_VERSION = "1"
             print("  WARNING: Wrong package installed — 'codebrain' on PyPI is a different tool.")
-            print("  Run: pip uninstall codebrain && pip install git+https://github.com/DawerJ/CodeBrain-CLI.git")
-        if server_version != CLIENT_VERSION:
-            print(f"  Version mismatch: local package is v{CLIENT_VERSION}, server expects v{server_version}")
-            print(f"     Run: pip install --upgrade git+https://github.com/DawerJ/CodeBrain-CLI.git  then restart Claude Code")
+            print(f"  Run: pip uninstall codebrain -y && uv tool install --force {_GITHUB_URL}")
+
+        needs_update = server_version != CLIENT_VERSION
+        if needs_update:
+            print(f"  Client needs update: local v{CLIENT_VERSION}, server expects v{server_version}")
+            print("  Auto-upgrading...")
+            if _auto_reinstall_package():
+                try:
+                    cmd_upgrade()
+                except Exception:
+                    pass
+                print("\n  Auto-upgraded. Restart Claude Code to load the updated MCP tools.")
+            else:
+                print(f"\n  Auto-upgrade failed. Run manually then restart Claude Code:")
+                print(f"    uv tool install --force {_GITHUB_URL}")
         else:
             print(f"  Connected — API healthy (v{server_version})")
     except Exception as e:
@@ -1567,7 +1642,6 @@ def cmd_upgrade() -> int:
     #
     # NOTE: proper 3-way merge (server template changed AND local has additions) is a
     # deeper problem — see annotation in CodeBrain for the design work still needed.
-    from codeownership.__main__ import extract_template_stamp  # type: ignore
     server_claude = _fetch_template(url, api_key, "CLAUDE.md", codebase_id, codebase_name)
     local_claude_path = Path("CLAUDE.md")
     local_claude = local_claude_path.read_text(encoding="utf-8") if local_claude_path.exists() else None
