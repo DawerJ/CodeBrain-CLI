@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "18"
+CLIENT_VERSION = "19"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -635,6 +635,42 @@ def resolve_annotation(annotation_id: str, codebase_id: str = "") -> str:
 
 
 @mcp.tool()
+def evaluate_jit_session(
+    what_done: str,
+    functions_changed: list[dict] | None = None,
+    codebase_id: str = "",
+    hours_back: int = 4,
+) -> str:
+    """
+    Retrospective JIT quality evaluation for a completed session.
+
+    Scores JIT calls from this session against what was actually worked on.
+    This is the primary signal for improving JIT quality over time.
+    Call at session end, after push_session_summary, with the same what_done
+    and functions_changed used in the summary.
+
+    Args:
+        what_done: Same narrative passed to push_session_summary.
+        functions_changed: Same list of dicts passed to push_session_summary.
+        codebase_id: Codebase ID. Leave blank to use the first available codebase.
+        hours_back: How far back to look for JIT calls (default 4 hours).
+    """
+    try:
+        data = _post("jit-evaluate-session", {
+            "codebase_id": codebase_id,
+            "what_done": what_done,
+            "functions_changed": functions_changed or [],
+            "hours_back": hours_back,
+        })
+    except Exception as e:
+        return _fmt_err(e)
+    if "error" in data:
+        return data["error"]
+    result = data.get("result", "")
+    return result if result else "JIT session evaluation complete (no JIT calls found in window)."
+
+
+@mcp.tool()
 def report_change(
     codebase_id: str = "",
     changed_functions: list[str] | None = None,
@@ -721,7 +757,6 @@ def rescan_stale(codebase_id: str = "") -> str:
     if isinstance(rows, dict) and "error" in rows:
         return rows["error"]
 
-    import hashlib
     stale_files: set[str] = set()
     # DB-flagged with no resolvable local file — clear the flag directly
     no_file_ids: list[str] = []
@@ -734,16 +769,46 @@ def rescan_stale(codebase_id: str = "") -> str:
             else:
                 # Flag is set but no local file — clear it to keep list_stale accurate
                 no_file_ids.append(r["id"])
-            continue
-        # File-based staleness check (hash comparison)
-        if fp and os.path.exists(fp):
+
+    # AST-based per-function hash comparison — reuses _count_hash_stale_files logic
+    # but collects the stale file paths instead of just counting.
+    # Previous approach hashed the whole file and compared to function-level source_hash,
+    # which always differed, causing a full rescan every time.
+    try:
+        import ast as _ast
+        import hashlib as _hl
+        file_to_units: dict[str, list] = {}
+        for r in rows:
+            fp = r.get("file_path", "")
+            if fp and not r.get("is_stale"):  # DB-flagged ones already handled above
+                file_to_units.setdefault(fp, []).append(r)
+        for file_path, units in file_to_units.items():
+            p = Path(file_path)
+            if not p.exists():
+                continue
             try:
-                content = Path(fp).read_text(encoding="utf-8", errors="replace")
-                current_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
-                if current_hash != (r.get("source_hash") or ""):
-                    stale_files.add(fp)
-            except OSError:
-                pass
+                source = p.read_text(encoding="utf-8", errors="replace")
+                tree = _ast.parse(source)
+            except Exception:
+                stale_files.add(file_path)
+                continue
+            current_fns: dict[str, str] = {}
+            for node in _ast.walk(tree):
+                if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                    fn_src = _ast.get_source_segment(source, node)
+                    if fn_src:
+                        current_fns[node.name] = fn_src
+            for u in units:
+                fn_src = current_fns.get(u.get("name", ""))
+                if fn_src is None:
+                    stale_files.add(file_path)
+                    break
+                new_hash = _hl.sha256(fn_src.encode()).hexdigest()
+                if new_hash != (u.get("source_hash") or ""):
+                    stale_files.add(file_path)
+                    break
+    except Exception:
+        pass
 
     summary_parts: list[str] = []
 
