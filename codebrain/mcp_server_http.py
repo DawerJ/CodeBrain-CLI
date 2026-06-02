@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "16"
+CLIENT_VERSION = "17"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -259,6 +259,61 @@ def _write_session_file(sessions: list, codebase_id: str, codebase_name: str = "
         f.write("\n".join(lines))
 
 
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _count_hash_stale_files(units: list[dict]) -> tuple[int, int]:
+    """
+    Count files with functions that changed on disk since last scan.
+
+    Uses per-function AST hash comparison (same algorithm as ingestion) so the
+    result matches what rescan_stale would find. Returns (stale_files, files_checked).
+    Returns (-1, 0) if AST parsing is unavailable.
+    """
+    try:
+        import ast as _ast
+        import hashlib as _hl
+    except ImportError:
+        return -1, 0
+
+    file_to_units: dict[str, list] = {}
+    for r in units:
+        fp = r.get("file_path", "")
+        if fp:
+            file_to_units.setdefault(fp, []).append(r)
+
+    stale_count = 0
+    checked = 0
+    for file_path, file_units in file_to_units.items():
+        p = Path(file_path)
+        if not p.exists():
+            continue
+        checked += 1
+        try:
+            source = p.read_text(encoding="utf-8", errors="replace")
+            tree = _ast.parse(source)
+        except Exception:
+            continue
+
+        current_fns: dict[str, str] = {}
+        for node in _ast.walk(tree):
+            if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                fn_src = _ast.get_source_segment(source, node)
+                if fn_src:
+                    current_fns[node.name] = fn_src
+
+        for u in file_units:
+            fn_src = current_fns.get(u.get("name", ""))
+            if fn_src is None:
+                stale_count += 1
+                break
+            new_hash = _hl.sha256(fn_src.encode()).hexdigest()
+            if new_hash != (u.get("source_hash") or ""):
+                stale_count += 1
+                break
+
+    return stale_count, checked
+
+
 # ── Tools ──────────────────────────────────────────────────────────────────────
 
 @mcp.tool()
@@ -321,10 +376,23 @@ def get_session_context(codebase_id: str = "") -> str:
             lines.append(f"- {(u.get('body') or '')[:200]}")
 
     stale = data.get("stale_count", 0)
+    stale_label = "function(s) flagged stale"
     total = data.get("total_functions", 0)
     unassigned = data.get("unassigned_count", 0)
+    # Prefer file-hash staleness over the is_stale DB flag (set only by report_change).
+    # The DB flag count is misleadingly low — a freshly-cloned or code-edited codebase
+    # can show 0 flagged while hundreds of functions have drifted on disk.
+    try:
+        stale_rows = _get("stale", codebase_id=data.get("codebase_id") or codebase_id)
+        if isinstance(stale_rows, list):
+            hash_stale, files_checked = _count_hash_stale_files(stale_rows)
+            if files_checked > 0:
+                stale = hash_stale
+                stale_label = "file(s) changed on disk since last scan"
+    except Exception:
+        pass
     if stale:
-        lines.append(f"\n## Staleness\n{stale} function(s) flagged stale. Run rescan_stale to sync.")
+        lines.append(f"\n## Staleness\n{stale} {stale_label}. Run rescan_stale to sync.")
     else:
         lines.append("\n## Staleness\nAll functions up to date.")
 
