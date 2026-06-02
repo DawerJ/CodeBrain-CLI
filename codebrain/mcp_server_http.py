@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "17"
+CLIENT_VERSION = "18"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -607,6 +607,31 @@ def add_annotation(
     except Exception as e:
         return _fmt_err(e)
     return f"Annotation saved (id={data.get('id')})."
+
+
+@mcp.tool()
+def resolve_annotation(annotation_id: str, codebase_id: str = "") -> str:
+    """
+    Mark an annotation or unknown as resolved so it stops appearing in session context.
+
+    Use this when an open unknown has been answered or a todo has been completed.
+    The annotation_id comes from get_annotations or the Open Unknowns / Open annotations
+    section of get_session_context.
+
+    Args:
+        annotation_id: The annotation ID to resolve (e.g. 'd463ac87-076').
+        codebase_id: Codebase ID. Leave blank to use the first available codebase.
+    """
+    try:
+        data = _post("resolve-annotation", {
+            "annotation_id": annotation_id,
+            "codebase_id": codebase_id,
+        })
+    except Exception as e:
+        return _fmt_err(e)
+    if "error" in data:
+        return data["error"]
+    return f"Annotation {data.get('resolved')} marked resolved."
 
 
 @mcp.tool()
