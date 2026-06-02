@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "14"
+CLIENT_VERSION = "15"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -104,6 +104,21 @@ def _put(path: str, body: dict) -> Any:
         )
     r.raise_for_status()
     return r.json()
+
+
+def _get_session_id() -> str:
+    """Read the persistent session ID from .codebrain/session_id (survives context resets)."""
+    import uuid as _uuid
+    sid_path = Path(".codebrain") / "session_id"
+    try:
+        if sid_path.exists():
+            return sid_path.read_text(encoding="utf-8").strip()
+        sid = _uuid.uuid4().hex
+        if sid_path.parent.is_dir():
+            sid_path.write_text(sid, encoding="utf-8")
+        return sid
+    except Exception:
+        return ""
 
 
 def _fmt_err(e: Exception) -> str:
@@ -796,10 +811,19 @@ def push_session_summary(
             "lessons_learned": lessons_learned or [],
             "next_session_goals": next_session_goals or [],
             "concepts": concepts or [],
+            "session_id": _get_session_id(),
         })
     except Exception as e:
         return _fmt_err(e)
-    return f"Session summary saved (id={data.get('id')})."
+    msg = f"Session summary saved (id={data.get('id')})."
+    tentative = data.get("tentative_concepts") or []
+    if tentative:
+        msg += f"\n\n**Tentative concepts from this session ({len(tentative)}):**\n"
+        for tc in tentative:
+            desc = f" — {tc['description']}" if tc.get("description") else ""
+            msg += f"- **{tc['name']}** (L{tc.get('level', 1)}){desc}\n"
+        msg += "\nReview these before `release_work`: promote worthy ones via `approve_concept` or `push_learn_content`, or let them expire."
+    return msg
 
 
 @mcp.tool()
@@ -1509,6 +1533,47 @@ def reject_concept(name: str = "", suggestion_id: str = "") -> str:
     """
     try:
         return _post("concepts/reject", {"name": name, "suggestion_id": suggestion_id}).get("result", "")
+    except Exception as e:
+        return _fmt_err(e)
+
+
+@mcp.tool()
+def add_tentative_concept(
+    name: str,
+    description: str = "",
+    level: int = 1,
+    codebase_id: str = "",
+) -> str:
+    """
+    Add a session-scoped tentative concept node to the codebase concept graph.
+
+    Call this during a session when a new codebase-specific concept surfaces in design
+    discussion, architectural thinking, or pre-code planning — even before any code exists.
+    Tentative concepts appear in JIT pre-filter for the current session only (other users
+    and sessions cannot see them). At session end, push_session_summary returns the full
+    list for review — promote worthy ones via approve_concept or push_learn_content,
+    or let them expire.
+
+    Use for: design decisions being discussed, planned architecture, domain-specific
+    mechanisms being invented, new patterns being established. Do NOT use for universal
+    programming concepts already in the universal graph.
+
+    Args:
+        name: Concept name (codebase-specific, e.g. "Claim-based pre-extraction").
+        description: One sentence describing the concept and its role in this codebase.
+        level: 0=system-wide, 1=feature-level, 2=function-level, 3=implementation detail.
+        codebase_id: Leave blank to use the first available codebase.
+    """
+    try:
+        session_id = _get_session_id()
+        data = _post("concepts/add-tentative", {
+            "name": name,
+            "description": description,
+            "level": level,
+            "codebase_id": codebase_id,
+            "session_id": session_id,
+        })
+        return data.get("result", "")
     except Exception as e:
         return _fmt_err(e)
 
