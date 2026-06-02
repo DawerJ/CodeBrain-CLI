@@ -1641,6 +1641,157 @@ def cmd_up(args: argparse.Namespace) -> int:
     return 0
 
 
+def _try_three_way_merge(
+    local: str, local_hash: str,
+    url: str, api_key: str, codebase_id: str, codebase_name: str,
+) -> tuple[str | None, bool]:
+    """
+    Fetch server diff and apply it to local content.
+    Returns (merged_content, success). On failure returns (None, False).
+    Prints a line for each hunk that couldn't be auto-applied (manual review needed).
+    """
+    try:
+        import httpx as _hx
+        r = _hx.get(
+            f"{url}/api/v1/client-template-diff",
+            params={
+                "template": "CLAUDE.md",
+                "prev_hash": local_hash,
+                "codebase_id": codebase_id,
+                "codebase_name": codebase_name,
+            },
+            headers={"X-API-Key": api_key},
+            timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json()
+    except Exception:
+        return None, False
+
+    reason = data.get("reason", "")
+    if data.get("diff") is None:
+        if reason == "already_current":
+            return local, True  # nothing to do
+        return None, False  # no history — can't merge
+
+    merged, skipped = _apply_unified_diff(local, data["diff"])
+
+    if skipped:
+        print(f"  ⚠️  {len(skipped)} hunk(s) need manual review (your changes overlap server edits):")
+        for s in skipped:
+            print(f"       {s}")
+
+    # Update the stamp in the merged content to the new server hash
+    new_hash = data.get("new_hash", "")
+    if new_hash:
+        merged = _replace_template_stamp(merged, new_hash)
+
+    return merged, True
+
+
+def _replace_template_stamp(content: str, new_hash: str) -> str:
+    """Replace or append the <!-- codebrain-template: HASH --> stamp."""
+    import re as _re
+    stamp_line = f"<!-- codebrain-template: {new_hash} -->"
+    pattern = r"<!-- codebrain-template: [a-f0-9]+ -->"
+    if _re.search(pattern, content):
+        return _re.sub(pattern, stamp_line, content)
+    return content.rstrip("\n") + f"\n{stamp_line}\n"
+
+
+def _apply_unified_diff(local: str, diff_text: str) -> tuple[str, list[str]]:
+    """
+    Apply a unified diff to local file content.
+    Returns (merged_content, list_of_skipped_hunk_descriptions).
+    Hunks whose changes can't be located are skipped (conservative: never corrupt content).
+    Processes hunks in reverse order so earlier line positions stay valid after each edit.
+
+    Two-level matching:
+      Level 1 — exact consecutive match of (context + removes): handles clean files.
+      Level 2 — match just the removal lines with a nearby context anchor: handles the
+                 case where the user inserted lines between the base context lines, so the
+                 consecutive sequence is broken but the actual removal target is still there.
+    """
+    import re as _re
+
+    if not diff_text.strip():
+        return local, []
+
+    local_lines = local.splitlines(keepends=True)
+    local_lines = [l if l.endswith("\n") else l + "\n" for l in local_lines]
+
+    hunk_re = _re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+    hunks: list[dict] = []
+    current: dict | None = None
+    for raw in diff_text.splitlines():
+        m = hunk_re.match(raw)
+        if m:
+            if current is not None:
+                hunks.append(current)
+            current = {"old_start": int(m.group(1)) - 1, "lines": []}
+        elif current is not None and raw.startswith((" ", "-", "+")):
+            current["lines"].append(raw + "\n")
+    if current is not None:
+        hunks.append(current)
+
+    skipped: list[str] = []
+
+    for hunk in reversed(hunks):
+        hint = hunk["old_start"]
+        context_lines = [l[1:] for l in hunk["lines"] if l.startswith(" ")]
+        removes      = [l[1:] for l in hunk["lines"] if l.startswith("-")]
+        adds         = [l[1:] for l in hunk["lines"] if l.startswith("+")]
+
+        # Full expected sequence for Level-1 match
+        expected    = [l[1:] for l in hunk["lines"] if l.startswith((" ", "-"))]
+        replacement = [l[1:] for l in hunk["lines"] if l.startswith((" ", "+"))]
+
+        lo = max(0, hint - 5)
+        hi = min(len(local_lines), hint + len(expected) + 15)
+
+        match_start = match_len = None
+        match_repl: list[str] = []
+
+        # Level 1: exact consecutive match
+        for i in range(lo, hi):
+            if local_lines[i : i + len(expected)] == expected:
+                match_start, match_len, match_repl = i, len(expected), replacement
+                break
+
+        # Level 1 fuzzy (ignore trailing whitespace)
+        if match_start is None:
+            exp_s = [l.rstrip() for l in expected]
+            for i in range(lo, hi):
+                if [l.rstrip() for l in local_lines[i : i + len(expected)]] == exp_s:
+                    match_start, match_len, match_repl = i, len(expected), replacement
+                    break
+
+        # Level 2: find just the removal lines with a nearby context anchor.
+        # Used when user inserted lines between base context lines.
+        if match_start is None and removes:
+            for i in range(0, len(local_lines)):
+                if local_lines[i : i + len(removes)] != removes:
+                    continue
+                # Verify at least one context line appears nearby (±removes+5)
+                win = local_lines[max(0, i - len(removes) - 5) :
+                                  min(len(local_lines), i + len(removes) + 5)]
+                if not context_lines or any(c in win for c in context_lines):
+                    match_start, match_len, match_repl = i, len(removes), adds
+                    break
+
+        if match_start is None:
+            sample = (removes or expected or ["?"])[0].strip()[:60]
+            skipped.append(f"~line {hint + 1}: '{sample}' (local differs — review manually)")
+            continue
+
+        local_lines[match_start : match_start + match_len] = match_repl
+
+    merged = "".join(local_lines)
+    if not local.endswith("\n") and merged.endswith("\n"):
+        merged = merged[:-1]
+    return merged, skipped
+
+
 def cmd_upgrade() -> int:
     from .config import load as _load_cfg
 
@@ -1693,12 +1844,30 @@ def cmd_upgrade() -> int:
             # No stamp in local file — unknown origin, don't overwrite
             skipped.append("CLAUDE.md (no template stamp found — skipped to avoid losing content)")
         else:
-            # Server template has genuinely changed (different hash). Overwrite.
-            # TODO: 3-way merge — preserve local additions while applying server changes.
-            print("  ⚠️  CLAUDE.md: server template has changed. Updating.")
-            print("     If you had local additions, re-run `codebrain push-claude-md` after.")
-            local_claude_path.write_text(server_claude, encoding="utf-8")
-            updated.append("CLAUDE.md")
+            # Server template has genuinely changed. Attempt 3-way merge.
+            merged, merge_ok = _try_three_way_merge(
+                local_claude, local_hash, url, api_key, codebase_id, codebase_name
+            )
+            if merge_ok and merged is not None:
+                local_claude_path.write_text(merged, encoding="utf-8")
+                updated.append("CLAUDE.md (3-way merged)")
+                print("  ✓  CLAUDE.md: auto-merged server improvements (your additions preserved).")
+            else:
+                # Fallback: can't merge (no history on server yet), prompt user
+                print("  ⚠️  CLAUDE.md: server template has changed.")
+                print("     3-way merge unavailable (server hasn't built history for your version yet).")
+                print("     Options: [k] keep local  [a] accept server version (local additions lost)")
+                try:
+                    choice = input("  Choice [k/a, default k]: ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    choice = "k"
+                if choice == "a":
+                    local_claude_path.write_text(server_claude, encoding="utf-8")
+                    updated.append("CLAUDE.md")
+                    print("  Accepted server version.")
+                else:
+                    skipped.append("CLAUDE.md (kept local — run `codebrain push-claude-md` after manual merge)")
+                    print("  Kept local version.")
 
     commands_dir = Path(".claude") / "commands"
     commands_dir.mkdir(parents=True, exist_ok=True)
