@@ -945,7 +945,22 @@ def _check_client_files_up_to_date(codebase_id: str, codebase_name: str, url: st
         (Path(".claude") / "commands" / "investigate.md", _fetch_template(url, api_key, "investigate.md", codebase_id, name)),
         (Path(".claude") / "commands" / "commands.md", _fetch_template(url, api_key, "commands.md", codebase_id, name)),
     ]
-    stale = [str(p) for p, canonical in checks if not p.exists() or p.read_text(encoding="utf-8") != canonical]
+    stale = []
+    for p, canonical in checks:
+        if not p.exists():
+            stale.append(str(p))
+            continue
+        local = p.read_text(encoding="utf-8")
+        if p.name == "CLAUDE.md":
+            # Stamp-aware check: only flag stale if local has a stamp AND it differs from server.
+            # No local stamp means unknown origin (manually written or pre-stamp) — upgrade can't
+            # help, so don't emit a misleading warning.
+            local_stamp, _ = extract_template_stamp(local)
+            server_stamp, _ = extract_template_stamp(canonical)
+            if local_stamp and local_stamp != server_stamp:
+                stale.append(str(p))
+        elif local != canonical:
+            stale.append(str(p))
     if stale:
         print("\n⚠️  Client files are behind the current template:")
         for f in stale:
