@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "10"
+CLIENT_VERSION = "11"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -1412,6 +1412,89 @@ def suggest_concept(name: str, description_hint: str = "", context: str = "", co
     except Exception as e:
         return _fmt_err(e)
     return result.get("result", str(result))
+
+
+@mcp.tool()
+def list_concept_suggestions(codebase_id: str = "", limit: int = 20) -> str:
+    """
+    List pending concept suggestions waiting in the review queue.
+
+    Shows suggestions queued by suggest_concept that have not been approved or rejected.
+    Use before approve_concept or reject_concept to see what's pending.
+
+    Args:
+        codebase_id: Leave blank to use the first available codebase.
+        limit: Maximum number of suggestions to return (default 20).
+    """
+    try:
+        result = _post("concepts/list-suggestions", {"codebase_id": codebase_id, "limit": limit})
+        suggestions = result.get("suggestions", [])
+        if not suggestions:
+            return result.get("result", "No pending suggestions.")
+        lines = [result.get("result", f"{len(suggestions)} pending:")]
+        for s in suggestions:
+            hint = f" — {s['description_hint']}" if s.get("description_hint") else ""
+            lines.append(f"  [{s['id']}] {s['name']}{hint}")
+        return "\n".join(lines)
+    except Exception as e:
+        return _fmt_err(e)
+
+
+@mcp.tool()
+def approve_concept(
+    name: str,
+    description: str = "",
+    level: int = 1,
+    codebase_id: str = "",
+    is_universal: bool = False,
+    suggestion_id: str = "",
+) -> str:
+    """
+    Approve a concept and add it to the concept graph immediately.
+
+    Promotes a queued suggestion (or creates a new node directly) without
+    requiring the web UI. Use this when suggest_concept queued something you
+    know should be in the graph, or to add a concept directly during a session.
+
+    Args:
+        name: Concept name to approve and add.
+        description: One sentence describing the concept.
+        level: 0=system-wide, 1=feature-level, 2=function-level, 3=implementation detail.
+        codebase_id: Leave blank to use the first available codebase.
+        is_universal: True to add as a universal concept available to all codebases.
+        suggestion_id: ID of an existing pending suggestion to approve (optional).
+    """
+    try:
+        result = _post("concepts/approve", {
+            "name": name, "description": description, "level": level,
+            "codebase_id": codebase_id, "is_universal": is_universal,
+            "suggestion_id": suggestion_id,
+        })
+        if result.get("ok"):
+            scope = "universal" if is_universal else "codebase"
+            note = " (already existed)" if result.get("existing") else ""
+            return f"Approved: '{name}' added to concept graph ({scope}, L{level}){note}."
+        return str(result)
+    except Exception as e:
+        return _fmt_err(e)
+
+
+@mcp.tool()
+def reject_concept(name: str = "", suggestion_id: str = "") -> str:
+    """
+    Reject a pending concept suggestion and remove it from the review queue.
+
+    Use to discard suggestions that are too narrow, duplicate, or not worth
+    adding to the concept graph.
+
+    Args:
+        name: Name of the pending suggestion to reject (matched case-insensitively).
+        suggestion_id: ID of the specific suggestion to reject (use instead of name if known).
+    """
+    try:
+        return _post("concepts/reject", {"name": name, "suggestion_id": suggestion_id}).get("result", "")
+    except Exception as e:
+        return _fmt_err(e)
 
 
 @mcp.tool()
