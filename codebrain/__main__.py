@@ -1734,6 +1734,18 @@ def _apply_unified_diff(local: str, diff_text: str) -> tuple[str, list[str]]:
     if current is not None:
         hunks.append(current)
 
+    # Locate user-additions fence so we never overwrite user content
+    fence_start = fence_end = None
+    for _idx, _line in enumerate(local_lines):
+        if "<!-- USER ADDITIONS START -->" in _line:
+            fence_start = _idx
+        elif "<!-- USER ADDITIONS END -->" in _line and fence_start is not None:
+            fence_end = _idx
+            break
+
+    def _in_fence(start: int) -> bool:
+        return fence_start is not None and fence_end is not None and fence_start < start < fence_end
+
     skipped: list[str] = []
 
     for hunk in reversed(hunks):
@@ -1782,6 +1794,10 @@ def _apply_unified_diff(local: str, diff_text: str) -> tuple[str, list[str]]:
         if match_start is None:
             sample = (removes or expected or ["?"])[0].strip()[:60]
             skipped.append(f"~line {hint + 1}: '{sample}' (local differs — review manually)")
+            continue
+
+        if _in_fence(match_start):
+            skipped.append(f"~line {hint + 1}: skipped (inside user-additions fence)")
             continue
 
         local_lines[match_start : match_start + match_len] = match_repl
