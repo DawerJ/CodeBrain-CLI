@@ -1778,7 +1778,7 @@ def cmd_push_claude_md(args: argparse.Namespace) -> int:
         return 1
 
     content = claude_path.read_text(encoding="utf-8")
-    payload = _json.dumps({"content": content}).encode()
+    payload = json.dumps({"content": content}).encode()
     headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
 
     try:
@@ -1787,7 +1787,7 @@ def cmd_push_claude_md(args: argparse.Namespace) -> int:
             data=payload, headers=headers, method="PUT",
         )
         with _req.urlopen(request, timeout=30) as resp:
-            data = _json.loads(resp.read())
+            data = json.loads(resp.read())
         if data.get("ok"):
             print(f"CLAUDE.md pushed to server for codebase {codebase_id}.")
             print("Future `codebrain upgrade` runs will fetch this version — your additions are safe.")
@@ -1863,7 +1863,7 @@ def cmd_concepts(args: argparse.Namespace) -> int:
             }).encode()
             request = _req.Request(f"{url}/api/v1/concepts/approve", data=payload, headers=headers, method="POST")
             with _req.urlopen(request, timeout=30) as resp:
-                data = _json.loads(resp.read())
+                data = json.loads(resp.read())
             if data.get("existing"):
                 print(f"'{name}' already in concept graph (node {data.get('node_id', '?')}).")
             elif data.get("ok"):
@@ -1887,7 +1887,7 @@ def cmd_concepts(args: argparse.Namespace) -> int:
             payload = _json.dumps({"codebase_id": codebase_id, "concept_names": list(refs.keys())}).encode()
             request = _req.Request(f"{url}/api/v1/concepts/gaps", data=payload, headers=headers, method="POST")
             with _req.urlopen(request, timeout=30) as resp:
-                data = _json.loads(resp.read())
+                data = json.loads(resp.read())
             synonyms = data.get("synonyms", [])
             if not synonyms:
                 print("All @concept: tags match canonical names. Nothing to normalize.")
@@ -1936,7 +1936,7 @@ def cmd_concepts(args: argparse.Namespace) -> int:
             payload = _json.dumps({"codebase_id": codebase_id, "concept_names": list(refs.keys())}).encode()
             request = _req.Request(f"{url}/api/v1/concepts/gaps", data=payload, headers=headers, method="POST")
             with _req.urlopen(request, timeout=30) as resp:
-                data = _json.loads(resp.read())
+                data = json.loads(resp.read())
 
             gaps = data.get("gaps", [])
             synonyms = data.get("synonyms", [])
@@ -1965,7 +1965,7 @@ def cmd_concepts(args: argparse.Namespace) -> int:
                 headers=headers,
             )
             with _req.urlopen(request, timeout=60) as resp:
-                data = _json.loads(resp.read())
+                data = json.loads(resp.read())
 
             issues = data.get("issues", [])
             print(f"Reviewed {data.get('nodes_reviewed', '?')} nodes. Found {len(issues)} issues:\n")
@@ -1980,7 +1980,7 @@ def cmd_concepts(args: argparse.Namespace) -> int:
                 headers=headers,
             )
             with _req.urlopen(request, timeout=60) as resp:
-                data = _json.loads(resp.read())
+                data = json.loads(resp.read())
 
             missing = data.get("missing", [])
             print(f"Orphan nodes (no prerequisites): {data.get('orphan_count', 0)}")
@@ -1995,7 +1995,7 @@ def cmd_concepts(args: argparse.Namespace) -> int:
             payload = _json.dumps({"codebase_id": codebase_id}).encode()
             request = _req.Request(f"{url}/api/v1/concepts/embed", data=payload, headers=headers, method="POST")
             with _req.urlopen(request, timeout=300) as resp:
-                data = _json.loads(resp.read())
+                data = json.loads(resp.read())
             print(f"Done — {data.get('embedded', 0)} nodes embedded.")
             return 0
 
