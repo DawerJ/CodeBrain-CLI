@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "13"
+CLIENT_VERSION = "14"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -329,6 +329,22 @@ def get_session_context(codebase_id: str = "") -> str:
                 "you will touch this session and any CRITICAL/STANDARD ones you can confidently assign. "
                 "Skip anything ambiguous — a wrong assignment is worse than none."
             )
+
+    pending = data.get("pending_suggestions") or []
+    if pending:
+        lines.append(f"\n## Pending concept suggestions ({len(pending)})")
+        lines.append("Queued by suggest_concept — approve or reject before next session so JIT can surface them.")
+        lines.append("Use `approve_concept` / `reject_concept`, or review in the web UI.")
+        for s in pending:
+            hint = f" — {s['description_hint']}" if s.get("description_hint") else ""
+            lines.append(f"  [{s['id']}] {s['name']}{hint}")
+
+    annotations = data.get("open_annotations") or []
+    if annotations:
+        lines.append(f"\n## Open annotations ({len(annotations)})")
+        for a in annotations:
+            target = f" on `{a['target_entity_id']}`" if a.get("target_entity_id") else ""
+            lines.append(f"  - [{a.get('intent_type','note')}]{target}: {(a.get('body') or '')[:120]}")
 
     # Write full session history to .codebrain/session.md as a side effect.
     # Run in a background thread — subprocess calls inside can hang on Windows
