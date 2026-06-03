@@ -1465,14 +1465,15 @@ def cmd_new(args: argparse.Namespace) -> int:
         _run_scan_and_push(scan_path, url, api_key, codebase_id)
 
     print(f"\nDone! codebase_id={codebase_id}")
+    print(f"Webapp: {url}")
     print("\nNext steps:")
     print(f"  1. Open {project_root} in Claude Code (or restart if already open)")
     print("  2. Type /project:session-start — CodeBrain will guide you from there")
     print()
-    print("To get the full experience (learn content, codebase-specific JIT):")
+    print("To get codebase-specific JIT (deeper context from your code):")
     if scan_path:
         print("  3. Run: codebrain ci   — sets up GitHub Actions to run the pipeline on every push")
-        print("     Then push to GitHub. The pipeline generates deep context from your code.")
+        print("     Then push to GitHub. The pipeline generates learn content from your code.")
     else:
         print("  3. Run: codebrain rescan --path .   — scan your code and push to CodeBrain")
         print("  4. Run: codebrain ci                — sets up GitHub Actions pipeline")
@@ -2138,7 +2139,7 @@ def cmd_ci(force: bool = False) -> int:
     print(f"       CODEBRAIN_URL        — your CodeBrain server URL")
     print(f"       CODEBRAIN_API_KEY    — your CI API key (get from webapp Settings)")
     print(f"  2. git add .github/ && git commit -m 'chore: add codebrain CI workflow'")
-    print(f"  3. Push — the workflow runs automatically on every Python file change")
+    print(f"  3. Push — the workflow runs automatically on every source file change (.py, .ts, .js, .swift, .kt)")
     return 0
 
 
