@@ -1470,10 +1470,18 @@ def cmd_new(args: argparse.Namespace) -> int:
         print(f"\nScanning {scan_path} and pushing to CodeBrain ...")
         _run_scan_and_push(scan_path, url, api_key, codebase_id)
 
+    # Verify commands directory
+    written_cmds = [f for f in commands_dir.iterdir() if f.suffix == ".md"] if commands_dir.exists() else []
     print(f"\nDone! codebase_id={codebase_id}")
     print(f"Webapp: {url}")
+    print(f"\nSlash commands written to: {commands_dir}")
+    if written_cmds:
+        print("  " + "  ".join(f.name for f in sorted(written_cmds)))
+    else:
+        print("  (none — check permissions?)")
     print("\nNext steps:")
-    print(f"  1. Open {project_root} in Claude Code (or restart if already open)")
+    print(f"  1. Open THIS folder in VS Code: {project_root}")
+    print("     Then: Ctrl+Shift+P → 'Developer: Reload Window'  (so Claude Code picks up the new commands)")
     print("  2. Type /project:session-start — CodeBrain will guide you from there")
     print()
     print("To get codebase-specific JIT (deeper context from your code):")
