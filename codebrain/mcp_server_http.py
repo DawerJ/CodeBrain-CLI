@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "35"
+CLIENT_VERSION = "36"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -330,6 +330,9 @@ def get_session_context(codebase_id: str = "") -> str:
     @reads: most
     
     @reads: offer_text
+    
+    @reads: your
+    @reads: there
     """
     try:
         data = _get("session-context", codebase_id=codebase_id)
@@ -362,12 +365,27 @@ def get_session_context(codebase_id: str = "") -> str:
     user_session_count = data.get("user_session_count", 0)
     assist_active = user_session_count < 5 and data.get("assist_enabled", True)
     if assist_active:
+        _arch_label = "Architecture exists — offer explore: " if arch else "No architecture yet (cold start) — just invite description: "
+        _arch_prompt = (
+            '"I just loaded your project context. Want an architecture overview (`/project:explore`) or tell me what you\'re building?"'
+            if arch else
+            '"I\'ve indexed [N] functions from your project. Tell me what you want to build and I\'ll help from there — JIT will kick in right away."'
+        )
+        _task_tip = (
+            '"Try `/project:explore` for an architecture overview"'
+            if arch else
+            '"Tell me what you\'re building — JIT will orient you right away"'
+        )
+        _reminder = (
+            "**Reminder:** End with: `/project:commands` for all available commands. `codebrain assist off` to silence these hints."
+            if user_session_count in (0, 2, 4) else ""
+        )
         lines.append(
             f"\n## New User Assist (session {user_session_count + 1} of 5)\n"
             "New user mode — follow these instructions throughout the session:\n\n"
-            f"**Right after session start:** Say what CodeBrain loaded, then offer a first action.\n"
-            f"  {'Architecture exists — offer explore: ' if arch else 'No architecture yet (cold start) — just invite description: '}\n"
-            f"  {'\"I just loaded your project context. Want an architecture overview (`/project:explore`) or tell me what you\\'re building?\"' if arch else '\"I\\'ve indexed [N] functions from your project. Tell me what you want to build and I\\'ll help from there — JIT will kick in right away.\"'}\n\n"
+            "**Right after session start:** Say what CodeBrain loaded, then offer a first action.\n"
+            f"  {_arch_label}\n"
+            f"  {_arch_prompt}\n\n"
             "**JIT fires on everything — including brainstorming.** Call get_jit_context the moment the user\n"
             "describes ANYTHING: a task, a question, 'I'm thinking about...', 'how would I...'. Don't wait\n"
             "for a formal task statement. Deliver the 4-item fast load, then:\n"
@@ -379,14 +397,14 @@ def get_session_context(codebase_id: str = "") -> str:
             "Then: 'The short version: it silently learns what you know and delivers exactly the right context\n"
             "at the right moment. Each session it gets more accurate about your specific gaps.'\n\n"
             "**Suggest commands at natural moments:**\n"
-            f"  - After session start with no clear task → {'\"Try `/project:explore` for an architecture overview\"' if arch else '\"Tell me what you\\'re building — JIT will orient you right away\"'}\n"
+            f"  - After session start with no clear task → {_task_tip}\n"
             "  - When debugging → 'Want to trace this with `/project:investigate`?'\n"
             "  - When a decision is made → annotate it (don't just suggest)\n"
             "  - When context feels heavy → 'Good stopping point — `/project:session-end` to save this?'\n\n"
             "**After each major tool call:** One sentence. 'I just [what] — [why it matters].'\n\n"
             "**At session end:** Show mastery delta + say: 'These numbers compound — by session 5,\n"
             "CodeBrain knows exactly where your gaps are and stops teaching you things you already understand.'\n\n"
-            f"{'**Reminder:** End with: `/project:commands` for all available commands. `codebrain assist off` to silence these hints.' if user_session_count in (0, 2, 4) else ''}"
+            f"{_reminder}"
         )
 
     sessions = data.get("recent_sessions") or []
