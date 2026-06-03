@@ -85,7 +85,9 @@ def _compute_template_hash(content_without_stamp: str) -> str:
 
 
 def extract_template_stamp(content: str) -> tuple[str, str]:
-    """Return (stamp_hash, content_without_stamp_line), or ("", content) if none found."""
+    """Return (stamp_hash, content_without_stamp_line), or ("", content) if none found.
+    @feature:   Main  
+    """
     lines = content.splitlines(keepends=True)
     for i in range(len(lines) - 1, max(len(lines) - 5, -1), -1):
         line = lines[i].strip()
@@ -1115,7 +1117,11 @@ def _api_post_public(url: str, path: str, body: dict) -> tuple[int, dict]:
 
 
 def cmd_signup(args: argparse.Namespace) -> int:
-    """Create a new CodeBrain account from the CLI."""
+    """Create a new CodeBrain account from the CLI.
+    @feature:   Main  
+    @reads: the
+    @reads: any
+    """
     from .config import load as _load_cfg, save as _save_cfg
     import httpx
 
@@ -1190,7 +1196,11 @@ def cmd_signup(args: argparse.Namespace) -> int:
 
 
 def cmd_login(args: argparse.Namespace) -> int:
-    """Log in to an existing CodeBrain account and save credentials."""
+    """Log in to an existing CodeBrain account and save credentials.
+    @feature:   Main  
+    
+    @reads: any
+    """
     from .config import load as _load_cfg, save as _save_cfg
     import httpx
 
@@ -1254,7 +1264,10 @@ def _select(prompt: str, options: list[str]) -> int:
 
 
 def cmd_new(args: argparse.Namespace) -> int:
-    """Interactive wizard: create a new project and set up local config files."""
+    """Interactive wizard: create a new project and set up local config files.
+    @feature:   Main  
+    @reads: github
+    """
     from .config import load as _load_cfg, save as _save_cfg
     import httpx, subprocess
 
@@ -1420,6 +1433,9 @@ def cmd_new(args: argparse.Namespace) -> int:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
+    """
+    @feature:   Main  
+    """
     from .config import save as _save_cfg
     import httpx
 
@@ -1544,6 +1560,10 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_up(args: argparse.Namespace) -> int:
+    """
+    @feature:   Main  
+    @mutates: it
+    """
     from .config import load as _load_cfg, migrate as _migrate_cfg
 
     if _migrate_cfg():
@@ -1808,7 +1828,39 @@ def _apply_unified_diff(local: str, diff_text: str) -> tuple[str, list[str]]:
     return merged, skipped
 
 
+def cmd_assist(args: argparse.Namespace) -> int:
+    """Toggle the new-user assist mode (session hints, step explanations) on or off.
+    @feature:   Main  
+    """
+    from .config import load as _load_cfg
+    cfg = _load_cfg()
+    url = cfg.get("url", "").rstrip("/")
+    key = cfg.get("api_key", "")
+    if not url or not key:
+        print("Not connected — run `codebrain init` first.")
+        return 1
+    import httpx
+    enabled = args.state == "on"
+    try:
+        r = httpx.post(
+            f"{url}/api/v1/user-pref",
+            json={"assist_enabled": enabled},
+            headers={"X-API-Key": key, "Content-Type": "application/json"},
+            timeout=15,
+        )
+        r.raise_for_status()
+    except Exception as e:
+        print(f"  Error: {e}")
+        return 1
+    status = "enabled" if enabled else "disabled"
+    print(f"  Assist {status}. Takes effect at the next session start.")
+    return 0
+
+
 def cmd_upgrade() -> int:
+    """
+    @feature:   Main  
+    """
     from .config import load as _load_cfg
 
     cfg = _load_cfg()
@@ -1944,7 +1996,9 @@ def cmd_upgrade() -> int:
 
 
 def cmd_push_claude_md(args: argparse.Namespace) -> int:
-    """Push the local CLAUDE.md to the server so `codebrain upgrade` never overwrites it."""
+    """Push the local CLAUDE.md to the server so `codebrain upgrade` never overwrites it.
+    @feature:   Main  
+    """
     from .config import load as _load_cfg
     import urllib.request as _req
 
@@ -1987,6 +2041,11 @@ def cmd_push_claude_md(args: argparse.Namespace) -> int:
 
 
 def cmd_ci(force: bool = False) -> int:
+    """
+    @feature:   Main  
+    
+    @reads: webapp
+    """
     from .config import load as _load_cfg
 
     cfg = _load_cfg()
@@ -2015,6 +2074,11 @@ def cmd_ci(force: bool = False) -> int:
 
 
 def cmd_concepts(args: argparse.Namespace) -> int:
+    """
+    @feature:   Main  
+    @reads: webapp
+    @reads: graph
+    """
     from .config import load as _load_cfg
     import json as _json
 
@@ -2190,6 +2254,9 @@ def cmd_concepts(args: argparse.Namespace) -> int:
 
 
 def cmd_rescan(args: argparse.Namespace) -> int:
+    """
+    @feature:   Main  
+    """
     from .config import load as _load_cfg
 
     cfg = _load_cfg() or {}
@@ -2254,7 +2321,13 @@ def _start_watcher(src_path: str, url: str, api_key: str, codebase_id: str) -> N
 # ── Demo command ─────────────────────────────────────────────────────────────
 
 def cmd_demo(args: argparse.Namespace) -> int:
-    """Build a real, indexed codebase from scratch and feel what CodeBrain gives you."""
+    """Build a real, indexed codebase from scratch and feel what CodeBrain gives you.
+    @feature:   Main  
+    @reads: watchdog
+    @reads: scratch
+    
+    @reads: nothing
+    """
     import time
     import httpx
     from .config import load as _load_cfg, save as _save_cfg
@@ -2526,7 +2599,10 @@ def _write_mcp_json_in(project_dir: Path, url: str, api_key: str, codebase_id: s
 
 
 def cmd_delete_demo(args: argparse.Namespace) -> int:
-    """Delete one or all demo codebases from the server."""
+    """Delete one or all demo codebases from the server.
+    @feature:   Main  
+    @reads: the
+    """
     import httpx
     import logging as _logging
     _logging.getLogger("httpx").setLevel(_logging.WARNING)
@@ -2612,7 +2688,9 @@ def cmd_delete_demo(args: argparse.Namespace) -> int:
 # ── Agent test commands ───────────────────────────────────────────────────────
 
 def cmd_test(args: argparse.Namespace) -> int:
-    """Run agent integration tests against CodeBrain."""
+    """Run agent integration tests against CodeBrain.
+    @feature:   Main  
+    """
     try:
         import anthropic  # noqa: F401
     except ImportError:
@@ -2640,7 +2718,9 @@ def cmd_test(args: argparse.Namespace) -> int:
 
 
 def cmd_test_results(args: argparse.Namespace) -> int:
-    """View agent test reports."""
+    """View agent test reports.
+    @feature:   Main  
+    """
     from .config import require as _require_cfg
     cfg = _require_cfg()
     url = cfg["url"]
@@ -2689,6 +2769,12 @@ def cmd_test_results(args: argparse.Namespace) -> int:
 # ── CLI entrypoint ────────────────────────────────────────────────────────────
 
 def main() -> None:
+    """
+    @feature:   Main  
+    @reads: webapp
+    @reads: scratch
+    @reads: the
+    """
     import io as _io
     if hasattr(sys.stdout, "buffer"):
         sys.stdout = _io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -2807,6 +2893,10 @@ def main() -> None:
     p_concepts.add_argument("--universal", action="store_true", default=False, help="Mark as universal concept (approve only)")
     p_concepts.add_argument("--apply", action="store_true", default=False, help="Apply corrections to source files (normalize only)")
 
+    # assist
+    p_assist = sub.add_parser("assist", help="Toggle the new-user assist mode on or off")
+    p_assist.add_argument("state", choices=["on", "off"], help="on: enable hints (default) | off: silence hints")
+
     # test
     p_test = sub.add_parser("test", help="Run agent integration tests against CodeBrain")
     p_test.add_argument("--mode", choices=["sandbox", "prod"], default="sandbox")
@@ -2866,6 +2956,8 @@ def main() -> None:
         sys.exit(cmd_delete_demo(args))
     elif args.command == "concepts":
         sys.exit(cmd_concepts(args))
+    elif args.command == "assist":
+        sys.exit(cmd_assist(args))
     elif args.command == "test":
         sys.exit(cmd_test(args))
     elif args.command == "test-results":
