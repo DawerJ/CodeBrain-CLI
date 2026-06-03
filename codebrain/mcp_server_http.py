@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "37"
+CLIENT_VERSION = "38"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -677,7 +677,13 @@ def add_annotation(
         })
     except Exception as e:
         return _fmt_err(e)
-    return f"Annotation saved (id={data.get('id')})."
+    target = f" on {function_name}" if function_name else " (codebase-level)"
+    return (
+        f"Annotation saved (id={data.get('id')}{target}). "
+        "Tell the user: 'I just annotated that decision — it now lives in CodeBrain permanently "
+        "and will surface in every future session. You can also run `/project:annotate` anytime "
+        "to capture decisions yourself.'"
+    )
 
 
 @mcp.tool()
