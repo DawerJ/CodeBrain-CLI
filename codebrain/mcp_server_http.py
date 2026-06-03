@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "36"
+CLIENT_VERSION = "37"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -382,28 +382,35 @@ def get_session_context(codebase_id: str = "") -> str:
         )
         lines.append(
             f"\n## New User Assist (session {user_session_count + 1} of 5)\n"
-            "New user mode — follow these instructions throughout the session:\n\n"
+            "New user mode — this is their first time with CodeBrain. Follow these instructions:\n\n"
+            "**Define terms before using them.** This user doesn't know CodeBrain jargon yet:\n"
+            "  - 'JIT' = just-in-time teaching: CodeBrain surfaces relevant concepts right when you need them\n"
+            "  - 'work claim' = reserving functions so teammates don't edit the same code simultaneously\n"
+            "  - 'mastery' = CodeBrain's model of what this developer knows, updated each session\n"
+            "Introduce each term naturally the first time. Don't assume they know it.\n\n"
             "**Right after session start:** Say what CodeBrain loaded, then offer a first action.\n"
             f"  {_arch_label}\n"
             f"  {_arch_prompt}\n\n"
             "**JIT fires on everything — including brainstorming.** Call get_jit_context the moment the user\n"
             "describes ANYTHING: a task, a question, 'I'm thinking about...', 'how would I...'. Don't wait\n"
             "for a formal task statement. Deliver the 4-item fast load, then:\n"
-            "  'I surfaced [X] because [reason — e.g. inactive/unknown/prerequisite]. Got those? Any need more?'\n\n"
-            "**Annotate decisions in real-time during brainstorming.** When the user makes a design decision,\n"
-            "explains a constraint, or discovers a tradeoff, call add_annotation immediately — don't ask first.\n"
-            "Then say: 'I just annotated that decision so it lives in CodeBrain permanently.'\n\n"
-            "**If the user asks how CodeBrain works:** Explain the 3 loops + 3 graphs + JIT + mastery in 4 bullets.\n"
-            "Then: 'The short version: it silently learns what you know and delivers exactly the right context\n"
-            "at the right moment. Each session it gets more accurate about your specific gaps.'\n\n"
-            "**Suggest commands at natural moments:**\n"
+            "  'I surfaced [X] because [reason]. Got those? Any need more before we start?'\n\n"
+            "**Annotate decisions in real-time.** When the user makes any design decision or tradeoff,\n"
+            "call add_annotation immediately — don't ask first. Then say:\n"
+            "  'I just annotated that — it's now in CodeBrain permanently. You can also run /project:annotate anytime.'\n\n"
+            "**If asked how CodeBrain works:** Explain in 3 bullets:\n"
+            "  1. Session memory: summaries persist so every session starts with full context\n"
+            "  2. JIT teaching: describe your task, get relevant background surfaced immediately\n"
+            "  3. Mastery tracking: every session updates a model of what you know, so teaching adapts\n"
+            "Then: 'The more sessions you do, the more precisely it knows what to skip and what to teach.'\n\n"
+            "**Suggest skills at natural moments (one at a time, not all at once):**\n"
             f"  - After session start with no clear task → {_task_tip}\n"
             "  - When debugging → 'Want to trace this with `/project:investigate`?'\n"
-            "  - When a decision is made → annotate it (don't just suggest)\n"
-            "  - When context feels heavy → 'Good stopping point — `/project:session-end` to save this?'\n\n"
-            "**After each major tool call:** One sentence. 'I just [what] — [why it matters].'\n\n"
-            "**At session end:** Show mastery delta + say: 'These numbers compound — by session 5,\n"
-            "CodeBrain knows exactly where your gaps are and stops teaching you things you already understand.'\n\n"
+            "  - After annotating → mention '/project:annotate' exists for future decisions\n"
+            "  - When work is winding down → 'Good stopping point — `/project:session-end` saves this session?'\n\n"
+            "**After each major tool call:** One sentence. 'I just [what] — [why it matters for you].'\n\n"
+            "**At session end:** Show mastery delta. Explain: 'These numbers compound — by session 5,\n"
+            "CodeBrain knows your exact gaps and stops teaching things you already understand.'\n\n"
             f"{_reminder}"
         )
 
