@@ -1898,6 +1898,12 @@ def cmd_upgrade() -> int:
     from .config import load as _load_cfg
 
     cfg = _load_cfg()
+    if not cfg.get("url") or not cfg.get("api_key"):
+        home_cfg = _load_cfg(root=Path.home())
+        if not cfg.get("url"):
+            cfg["url"] = home_cfg.get("url", "")
+        if not cfg.get("api_key"):
+            cfg["api_key"] = home_cfg.get("api_key", "")
     codebase_id = cfg.get("codebase_id") or ""
     codebase_name = cfg.get("name") or Path.cwd().name
     url = cfg.get("url") or ""
