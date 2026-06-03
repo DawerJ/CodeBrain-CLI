@@ -1570,6 +1570,14 @@ def cmd_up(args: argparse.Namespace) -> int:
         print("  Migrated .codebrain file → .codebrain/ directory (session.md can now be written)")
 
     cfg = _load_cfg()
+    # Fall back to home-dir config for url/api_key — codebrain signup/login saves
+    # credentials to ~/.codebrain, but project config only has codebase_id.
+    if not cfg.get("url") or not cfg.get("api_key"):
+        home_cfg = _load_cfg(root=Path.home())
+        if not cfg.get("url"):
+            cfg["url"] = home_cfg.get("url", "")
+        if not cfg.get("api_key"):
+            cfg["api_key"] = home_cfg.get("api_key", "")
     url = cfg.get("url") or ""
     api_key = cfg.get("api_key") or ""
     codebase_id = cfg.get("codebase_id") or ""
@@ -2260,6 +2268,13 @@ def cmd_rescan(args: argparse.Namespace) -> int:
     from .config import load as _load_cfg
 
     cfg = _load_cfg() or {}
+    # Fall back to home config for url/api_key if not in project config
+    if not cfg.get("url") or not cfg.get("api_key"):
+        home_cfg = _load_cfg(root=Path.home())
+        if not cfg.get("url"):
+            cfg["url"] = home_cfg.get("url", "")
+        if not cfg.get("api_key"):
+            cfg["api_key"] = home_cfg.get("api_key", "")
     url = (getattr(args, "url", None) or os.environ.get("CODEBRAIN_URL") or cfg.get("url", "")).rstrip("/")
     api_key = getattr(args, "api_key", None) or os.environ.get("CODEBRAIN_API_KEY") or cfg.get("api_key", "")
     codebase_id = (
