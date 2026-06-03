@@ -1036,10 +1036,24 @@ def _scan_python_files(path: str) -> list[dict]:
 
 
 def _run_scan_and_push(path: str, url: str, api_key: str, codebase_id: str) -> None:
-    """Scan local Python files and push code units to the CodeBrain API."""
+    """Scan local source files (all supported languages) and push code units to the API."""
     import httpx
 
-    units = _scan_python_files(path)
+    try:
+        from .scanner import scan_directory as _scan_dir, batch_ingest as _batch_ingest
+        scan_results = _scan_dir(path)
+        units = []
+        for cu, _ in _batch_ingest(scan_results):
+            units.append({
+                "name": cu.name,
+                "file_path": cu.file_path,
+                "source": cu.source,
+                "source_hash": cu.source_hash,
+                "profile_name": cu.assessment_profile.name,
+            })
+    except Exception:
+        units = _scan_python_files(path)
+
     print(f"  Found {len(units)} functions")
 
     total_pushed = 0
