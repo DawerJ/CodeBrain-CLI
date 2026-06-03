@@ -1465,6 +1465,9 @@ def cmd_new(args: argparse.Namespace) -> int:
     # Install git hook
     _install_git_hook_in(project_root)
 
+    # Write global friend-demo skills (personal, goes to ~/.claude/commands/)
+    _write_global_friend_demo_skills()
+
     # Scan if we have a local path
     if scan_path and choice in (0, 1):
         print(f"\nScanning {scan_path} and pushing to CodeBrain ...")
@@ -2068,6 +2071,11 @@ def cmd_upgrade() -> int:
         print("Already up to date:")
         for f in skipped:
             print(f"  {f}")
+
+    # Write global friend-demo skills to ~/.claude/commands/ (personal, not project-specific)
+    demo_written = _write_global_friend_demo_skills()
+    if demo_written:
+        updated.extend(demo_written)
 
     if updated:
         _show_changelog(url)
@@ -2860,6 +2868,130 @@ def cmd_test_results(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── Demo mode ─────────────────────────────────────────────────────────────────
+
+def cmd_demo_mode(args: argparse.Namespace) -> int:
+    """Swap .mcp.json between your personal key and a saved demo key.
+
+    Usage:
+      codebrain demo-mode on [--set-key <key>]  — switch to demo account
+      codebrain demo-mode off                    — switch back to personal account
+      codebrain demo-mode set-key <key>          — save demo key (do this once)
+
+    The demo key is stored in ~/.codebrain so you only type it once ever.
+    .mcp.json.bak is created on `on` and removed on `off` — gitignored automatically.
+
+    @feature: Main
+    """
+    from .config import load as _load_cfg, save as _save_cfg
+
+    action = getattr(args, "action", "").strip()
+    set_key = (getattr(args, "set_key", None) or "").strip()
+
+    mcp_path = Path(".mcp.json")
+    bak_path = Path(".mcp.json.bak")
+
+    # Load home config (stores demo_api_key across all projects)
+    home_cfg = _load_cfg(root=Path.home())
+
+    # Save key if provided
+    if set_key:
+        home_cfg["demo_api_key"] = set_key
+        _save_cfg(home_cfg, root=Path.home())
+        print(f"  Demo key saved to ~/.codebrain")
+        # Write the global skills so /friend-demo is immediately available
+        written = _write_global_friend_demo_skills()
+        for p in written:
+            print(f"  Wrote {p}")
+        if written:
+            print("  Reload Claude Code to pick up /friend-demo and /friend-demo-off skills.")
+        if action not in ("on", "off"):
+            return 0
+
+    if action == "on":
+        demo_key = home_cfg.get("demo_api_key", "").strip()
+        if not demo_key:
+            print("No demo key stored. Run once:")
+            print("  codebrain demo-mode on --set-key <your-demo-api-key>")
+            return 1
+
+        if bak_path.exists():
+            print("Already in demo mode (.mcp.json.bak exists). Run 'codebrain demo-mode off' first.")
+            return 1
+
+        if not mcp_path.exists():
+            print("No .mcp.json found. Run 'codebrain new' first.")
+            return 1
+
+        current = json.loads(mcp_path.read_text(encoding="utf-8"))
+        demo = json.loads(json.dumps(current))  # deep copy
+
+        # Swap only the API key, leave command/args/URL untouched
+        try:
+            demo["mcpServers"]["codebrain"]["env"]["CODEBRAIN_API_KEY"] = demo_key
+        except KeyError:
+            print("  Error: .mcp.json doesn't have expected mcpServers.codebrain.env structure.")
+            return 1
+
+        bak_path.write_text(json.dumps(current, indent=2), encoding="utf-8")
+        mcp_path.write_text(json.dumps(demo, indent=2), encoding="utf-8")
+        _ensure_gitignore(".mcp.json.bak")  # don't commit the backup
+
+        print("  Switched to demo account.")
+        print("  Reload Claude Code: Ctrl+Shift+P → Developer: Reload Window")
+        print("  When done: codebrain demo-mode off  →  reload again.")
+        return 0
+
+    elif action == "off":
+        if not bak_path.exists():
+            print("Not in demo mode (.mcp.json.bak not found). Nothing to restore.")
+            return 1
+
+        bak_path.replace(mcp_path)
+        print("  Switched back to your personal account.")
+        print("  Reload Claude Code: Ctrl+Shift+P → Developer: Reload Window")
+        return 0
+
+    else:
+        print("Usage: codebrain demo-mode [on|off] [--set-key <key>]")
+        return 1
+
+
+_FRIEND_DEMO_ON_MD = (
+    "Switch Claude Code to the demo account so you can show CodeBrain to a friend.\n\n"
+    "Run this in the terminal now (no confirmation needed -- just do it):\n\n"
+    "```bash\ncodebrain demo-mode on\n```\n\n"
+    "After it prints \"Switched to demo account\", tell the user:\n\n"
+    "\"Done -- please reload this window now: **Ctrl+Shift+P -> Developer: Reload Window**\n\n"
+    "After reloading you'll be on the demo account. When you're done showing your friend,\n"
+    "type /friend-demo-off to switch back.\"\n"
+)
+
+_FRIEND_DEMO_OFF_MD = (
+    "Switch Claude Code back to your personal account.\n\n"
+    "Run this in the terminal now:\n\n"
+    "```bash\ncodebrain demo-mode off\n```\n\n"
+    "After it prints \"Switched back to your personal account\", tell the user:\n\n"
+    "\"Done -- reload this window to go back to your account: **Ctrl+Shift+P -> Developer: Reload Window**\"\n"
+)
+
+
+def _write_global_friend_demo_skills() -> list[str]:
+    """Write /friend-demo and /friend-demo-off to ~/.claude/commands/. Returns list of written paths."""
+    cmds_dir = Path.home() / ".claude" / "commands"
+    cmds_dir.mkdir(parents=True, exist_ok=True)
+    written = []
+    for fname, content in [
+        ("friend-demo.md", _FRIEND_DEMO_ON_MD),
+        ("friend-demo-off.md", _FRIEND_DEMO_OFF_MD),
+    ]:
+        p = cmds_dir / fname
+        if not p.exists() or p.read_text(encoding="utf-8") != content:
+            p.write_text(content, encoding="utf-8")
+            written.append(str(p))
+    return written
+
+
 # ── CLI entrypoint ────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -2987,6 +3119,13 @@ def main() -> None:
     p_concepts.add_argument("--universal", action="store_true", default=False, help="Mark as universal concept (approve only)")
     p_concepts.add_argument("--apply", action="store_true", default=False, help="Apply corrections to source files (normalize only)")
 
+    # demo-mode
+    p_dm = sub.add_parser("demo-mode", help="Swap .mcp.json between personal and demo account")
+    p_dm.add_argument("action", nargs="?", default="",
+                      help="on: switch to demo key  |  off: switch back to personal key")
+    p_dm.add_argument("--set-key", default=None, dest="set_key",
+                      help="Save your demo API key once (stored in ~/.codebrain)")
+
     # assist
     p_assist = sub.add_parser("assist", help="Toggle the new-user assist mode on or off")
     p_assist.add_argument("state", choices=["on", "off"], help="on: enable hints (default) | off: silence hints")
@@ -3050,6 +3189,8 @@ def main() -> None:
         sys.exit(cmd_delete_demo(args))
     elif args.command == "concepts":
         sys.exit(cmd_concepts(args))
+    elif args.command == "demo-mode":
+        sys.exit(cmd_demo_mode(args))
     elif args.command == "assist":
         sys.exit(cmd_assist(args))
     elif args.command == "test":
