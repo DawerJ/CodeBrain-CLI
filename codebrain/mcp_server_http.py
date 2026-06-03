@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "21"
+CLIENT_VERSION = "22"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -975,6 +975,7 @@ def push_session_summary(
     next_session_goals: list[str] | None = None,
     codebase_id: str = "",
     concepts: list[dict] | None = None,
+    concepts_engaged: list | None = None,
 ) -> str:
     """
     Push end-of-session summary. Call at the end of every coding session.
@@ -1013,11 +1014,29 @@ def push_session_summary(
             "lessons_learned": lessons_learned or [],
             "next_session_goals": next_session_goals or [],
             "concepts": concepts or [],
+            "concepts_engaged": concepts_engaged or [],
             "session_id": _get_session_id(),
         })
     except Exception as e:
         return _fmt_err(e)
     msg = f"Session summary saved (id={data.get('id')})."
+
+    delta = data.get("mastery_delta") or []
+    if delta:
+        def _label(p: float) -> str:
+            if p < 0.30: return "unfamiliar"
+            if p < 0.45: return "aware"
+            if p < 0.65: return "working familiarity"
+            return "solid"
+        msg += f"\n\n**Mastery changes this session ({len(delta)} concept(s)):**\n"
+        for d in delta:
+            before, after = d["before"], d["after"]
+            arrow = "↑" if after > before else "→"
+            msg += (
+                f"- **{d['name']}**: {before:.0%} ({_label(before)}) "
+                f"{arrow} {after:.0%} ({_label(after)})\n"
+            )
+
     tentative = data.get("tentative_concepts") or []
     if tentative:
         msg += f"\n\n**Tentative concepts from this session ({len(tentative)}):**\n"
@@ -1668,6 +1687,8 @@ def get_concept_details(concept_names: list[str], codebase_id: str = "") -> str:
         codebase_id: Leave blank to use the first available codebase.
     
     @feature: Mcp Server Http
+    
+    @reads: get_jit_context
     """
     try:
         result = _post("concept-details", {"concept_names": concept_names, "codebase_id": codebase_id})
