@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "22"
+CLIENT_VERSION = "23"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -358,7 +358,7 @@ def get_session_context(codebase_id: str = "") -> str:
         lines.append("## Architecture\n(not yet generated)")
 
     user_session_count = data.get("user_session_count", 0)
-    assist_active = user_session_count < 5
+    assist_active = user_session_count < 5 and data.get("assist_enabled", True)
     if assist_active:
         lines.append(
             f"\n## New User Assist (session {user_session_count + 1})\n"
