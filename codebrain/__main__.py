@@ -776,18 +776,44 @@ def _write_global_claude_md() -> bool:
 
 # ── .mcp.json generators ──────────────────────────────────────────────────────
 
-def _make_mcp_json(url: str, api_key: str, python_path: str | None = None) -> dict:
-    """Generate .mcp.json with explicit Python path for reliable Electron launch.
+def _codebrain_importable(python_exe: str) -> bool:
+    """Return True if 'import codebrain' succeeds in the given Python interpreter."""
+    import subprocess as _sp
+    try:
+        r = _sp.run([python_exe, "-c", "import codebrain"], capture_output=True, timeout=5)
+        return r.returncode == 0
+    except Exception:
+        return False
 
-    Uses sys.executable by default so Claude Code bypasses PATH resolution entirely —
-    avoids the Electron partial-PATH problem where 'codebrain' isn't findable.
+
+def _make_mcp_json(url: str, api_key: str, python_path: str | None = None) -> dict:
+    """Generate .mcp.json with an explicit command for reliable Electron launch.
+
+    Prefers `python -m codebrain mcp` when codebrain is importable from sys.executable.
+    Falls back to the codebrain binary directly (full path via shutil.which) when the
+    current Python is a project venv that doesn't have the codebrain package installed —
+    avoids the Electron partial-PATH problem by always using absolute paths.
     """
-    cmd = python_path if python_path is not None else sys.executable
+    if python_path is not None:
+        cmd = python_path
+        args = ["-m", "codebrain", "mcp"]
+    elif _codebrain_importable(sys.executable):
+        cmd = sys.executable
+        args = ["-m", "codebrain", "mcp"]
+    else:
+        import shutil as _shutil
+        cb_bin = _shutil.which("codebrain")
+        if cb_bin:
+            cmd = cb_bin
+            args = ["mcp"]
+        else:
+            cmd = sys.executable  # fallback — may not work but no better option
+            args = ["-m", "codebrain", "mcp"]
     return {
         "mcpServers": {
             "codebrain": {
                 "command": cmd,
-                "args": ["-m", "codebrain", "mcp"],
+                "args": args,
                 "env": {
                     "CODEBRAIN_URL": url,
                     "CODEBRAIN_API_KEY": api_key,
@@ -1962,21 +1988,27 @@ def cmd_upgrade() -> int:
             cb = mcp_cfg.get("mcpServers", {}).get("codebrain", {})
             # Migrate: old HTTP/SSE transport OR generic "codebrain" command (no explicit path).
             # A custom absolute path (e.g. /path/to/python.exe) survives unchanged.
+            existing_cmd = cb.get("command", "")
+            existing_args = cb.get("args", [])
+            broken_python = (
+                existing_cmd
+                and existing_cmd != "codebrain"
+                and existing_args == ["-m", "codebrain", "mcp"]
+                and not _codebrain_importable(existing_cmd)
+            )
             needs_patch = (
                 "url" in cb
                 or cb.get("type") == "sse"
                 or cb.get("command") == "codebrain"
+                or broken_python
             )
             if needs_patch and ("CODEBRAIN_URL" in cb.get("env", {}) or url):
                 cb_env = cb.get("env", {})
-                mcp_cfg.setdefault("mcpServers", {})["codebrain"] = {
-                    "command": sys.executable,
-                    "args": ["-m", "codebrain", "mcp"],
-                    "env": {
-                        "CODEBRAIN_URL": cb_env.get("CODEBRAIN_URL", url),
-                        "CODEBRAIN_API_KEY": cb_env.get("CODEBRAIN_API_KEY", api_key),
-                    },
-                }
+                new_entry = _make_mcp_json(
+                    cb_env.get("CODEBRAIN_URL", url),
+                    cb_env.get("CODEBRAIN_API_KEY", api_key),
+                )["mcpServers"]["codebrain"]
+                mcp_cfg.setdefault("mcpServers", {})["codebrain"] = new_entry
                 mcp_path.write_text(
                     json.dumps(mcp_cfg, indent=2) + "\n", encoding="utf-8"
                 )
