@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "20"
+CLIENT_VERSION = "21"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -356,6 +356,17 @@ def get_session_context(codebase_id: str = "") -> str:
             pass
     else:
         lines.append("## Architecture\n(not yet generated)")
+
+    user_session_count = data.get("user_session_count", 0)
+    assist_active = user_session_count < 5
+    if assist_active:
+        lines.append(
+            f"\n## New User Assist (session {user_session_count + 1})\n"
+            "This is an early session — explain each step as you go. After each major action,\n"
+            "briefly say what you just did and why it matters. After JIT fires, add one sentence\n"
+            "explaining what happened. At session end, show mastery delta with concept names.\n"
+            f"{'Every 2-3 sessions, remind the user they can run /project:commands for a command list and `codebrain assist off` to silence these hints.' if user_session_count in (0, 2, 4) else ''}"
+        )
 
     sessions = data.get("recent_sessions") or []
     summary_sessions = sessions[:3]  # MCP response shows 3; file gets all 7
@@ -987,6 +998,8 @@ def push_session_summary(
             Each entry: {name, level (1-3), description, universal (bool), prereqs (list[str])}
     
     @feature: Mcp Server Http
+    
+    @reads: this
     """
     try:
         data = _post("session-summary", {
@@ -1128,6 +1141,8 @@ def push_concept_graph(
         codebase_id: Leave blank to use the first available codebase.
     
     @feature: Mcp Server Http
+    
+    @reads: your
     """
     try:
         data = _post("concept-graph", {
@@ -1284,6 +1299,8 @@ def check_work_claims(
         codebase_id: Leave blank to use the first available codebase.
     
     @feature: Mcp Server Http
+    
+    @reads: rolling
     """
     try:
         data = _post("work-claims/check", {
@@ -1382,6 +1399,8 @@ def claim_work(
     
     @feature: Mcp Server Http
     @reads: rolling
+    
+    @reads: functions
     """
     try:
         data = _post("work-claims", {
@@ -1544,6 +1563,8 @@ def submit_feedback(
         codebase_id: Codebase ID (optional, auto-detected if blank).
     
     @feature: Mcp Server Http
+    
+    @reads: within
     """
     try:
         result = _post("feedback", {
@@ -1623,6 +1644,8 @@ def get_jit_context(description: str, codebase_id: str = "", user_id: int = 0) -
         user_id: User ID for mastery lookup. 0 = use CODEBRAIN_USER_ID env var.
     
     @feature: Mcp Server Http
+    
+    @reads: the
     """
     try:
         result = _get("jit-context", description=description, codebase_id=codebase_id, user_id=user_id or "")
@@ -1767,6 +1790,8 @@ def reject_concept(name: str = "", suggestion_id: str = "") -> str:
         suggestion_id: ID of the specific suggestion to reject (use instead of name if known).
     
     @feature: Mcp Server Http
+    
+    @reads: the
     """
     try:
         return _post("concepts/reject", {"name": name, "suggestion_id": suggestion_id}).get("result", "")
@@ -1879,6 +1904,8 @@ def evaluate_jit_explanation(
         user_id: User ID. 0 = use CODEBRAIN_USER_ID env var.
     
     @feature: Mcp Server Http
+    
+    @reads: get_jit_context
     """
     try:
         result = _post("evaluate-jit", {
@@ -1906,6 +1933,9 @@ def get_client_template(template: str = "CLAUDE.md", codebase_id: str = "") -> s
         codebase_id: Leave blank to read from local .codebrain file.
     
     @feature: Mcp Server Http
+    
+    @reads: local
+    @reads: server
     """
     # Resolve codebase_id from .codebrain file if not provided
     cid = codebase_id
