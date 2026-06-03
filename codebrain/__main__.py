@@ -1307,6 +1307,9 @@ def cmd_new(args: argparse.Namespace) -> int:
     """Interactive wizard: create a new project and set up local config files.
     @feature:   Main  
     @reads: github
+    
+    @reads: there
+    @reads: your
     """
     from .config import load as _load_cfg, save as _save_cfg
     import httpx, subprocess
@@ -1463,12 +1466,18 @@ def cmd_new(args: argparse.Namespace) -> int:
 
     print(f"\nDone! codebase_id={codebase_id}")
     print("\nNext steps:")
-    print(f"  1. Open {project_root} in Claude Code")
+    print(f"  1. Open {project_root} in Claude Code (or restart if already open)")
+    print("  2. Type /project:session-start — CodeBrain will guide you from there")
+    print()
+    print("To get the full experience (learn content, codebase-specific JIT):")
     if scan_path:
-        print("  2. Restart Claude Code to pick up .mcp.json")
-        print("  3. Type /project:session-start to begin")
+        print("  3. Run: codebrain ci   — sets up GitHub Actions to run the pipeline on every push")
+        print("     Then push to GitHub. The pipeline generates deep context from your code.")
     else:
-        print("  2. Run 'codebrain rescan --path .' once you have local code")
+        print("  3. Run: codebrain rescan --path .   — scan your code and push to CodeBrain")
+        print("  4. Run: codebrain ci                — sets up GitHub Actions pipeline")
+    print()
+    print("JIT works immediately with universal concepts. Gets codebase-specific after the first pipeline run.")
     return 0
 
 
