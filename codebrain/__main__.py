@@ -1411,7 +1411,7 @@ def cmd_new(args: argparse.Namespace) -> int:
         codebase_id = hashlib.sha256(name.encode()).hexdigest()[:8]
         print(f"Warning: {e} — using id={codebase_id}")
 
-    project_root = Path(scan_path) if scan_path else Path(".")
+    project_root = Path(scan_path).resolve() if scan_path else Path(".").resolve()
     force = getattr(args, "force", False)
 
     # Write .codebrain
@@ -1442,18 +1442,25 @@ def cmd_new(args: argparse.Namespace) -> int:
     # Write slash commands
     commands_dir = project_root / ".claude" / "commands"
     commands_dir.mkdir(parents=True, exist_ok=True)
-    for fname, make_fn in [
+    _EXPECTED_COMMANDS = [
         ("session-start.md", _make_session_start_md),
         ("session-end.md", _make_session_end_md),
         ("explore.md", _make_explore_md),
         ("annotate.md", _make_annotate_md),
         ("investigate.md", _make_investigate_md),
         ("commands.md", _make_commands_md),
-    ]:
+    ]
+    skipped = []
+    for fname, make_fn in _EXPECTED_COMMANDS:
         p = commands_dir / fname
         if not p.exists() or force:
             p.write_text(make_fn(codebase_id), encoding="utf-8")
             print(f"  Wrote {p.relative_to(project_root)}")
+        else:
+            skipped.append(fname)
+    if skipped:
+        print(f"  Skipped (already exist): {', '.join(skipped)}")
+        print(f"  Run `codebrain new --force` or `codebrain upgrade` to refresh them.")
 
     # Install git hook
     _install_git_hook_in(project_root)
@@ -2614,12 +2621,15 @@ def cmd_demo(args: argparse.Namespace) -> int:
     )
     commands_dir = project_dir / ".claude" / "commands"
     commands_dir.mkdir(parents=True, exist_ok=True)
-    (commands_dir / "session-start.md").write_text(
-        _make_session_start_md(codebase_id), encoding="utf-8"
-    )
-    (commands_dir / "session-end.md").write_text(
-        _make_session_end_md(codebase_id), encoding="utf-8"
-    )
+    for _fname, _make_fn in [
+        ("session-start.md", _make_session_start_md),
+        ("session-end.md", _make_session_end_md),
+        ("explore.md", _make_explore_md),
+        ("annotate.md", _make_annotate_md),
+        ("investigate.md", _make_investigate_md),
+        ("commands.md", _make_commands_md),
+    ]:
+        (commands_dir / _fname).write_text(_make_fn(codebase_id), encoding="utf-8")
     demo_script = data.get("demo_script", "")
     if demo_script:
         (commands_dir / "demo.md").write_text(demo_script, encoding="utf-8")
