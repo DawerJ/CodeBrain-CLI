@@ -710,7 +710,6 @@ List all available CodeBrain slash commands for this project. No tool calls need
 
 | Command | What it does |
 |---------|-------------|
-| `/project:check-reports` | Review open user feedback reports from production |
 | `/project:commands` | Show this reference card |
 
 ---
