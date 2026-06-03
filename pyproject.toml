@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codebrain-cli"
-version = "27.0"
+version = "28.0"
 description = "CodeBrain client — connect your codebase to the CodeBrain understanding layer"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,6 +15,12 @@ dependencies = [
     "mcp[cli]>=1.0.0",
     # File watcher (codebrain up --watch)
     "watchdog>=4.0.0",
+    # Multi-language scanning (TypeScript, JavaScript, Swift, Kotlin)
+    "tree-sitter>=0.22.0",
+    "tree-sitter-typescript>=0.21.0",
+    "tree-sitter-javascript>=0.21.0",
+    "tree-sitter-swift>=0.7.0",
+    "tree-sitter-kotlin>=1.0.0",
 ]
 
 [project.scripts]
