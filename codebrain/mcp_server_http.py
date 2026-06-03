@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "19"
+CLIENT_VERSION = "20"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -324,6 +324,10 @@ def get_session_context(codebase_id: str = "") -> str:
 
     Args:
         codebase_id: Codebase ID. Leave blank to use the first available codebase.
+    
+    @feature: Mcp Server Http
+    @reads: datetime
+    @reads: most
     """
     try:
         data = _get("session-context", codebase_id=codebase_id)
@@ -454,6 +458,8 @@ def get_function_context(function_name: str, codebase_id: str = "") -> str:
     Args:
         function_name: Exact function name or substring to match.
         codebase_id: Codebase ID. Leave blank to use the first available codebase.
+    
+    @feature: Mcp Server Http
     """
     try:
         data = _get("function-context", function_name=function_name, codebase_id=codebase_id)
@@ -497,6 +503,8 @@ def get_architecture(codebase_id: str = "") -> str:
 
     Args:
         codebase_id: Codebase ID. Leave blank to use the first available codebase.
+    
+    @feature: Mcp Server Http
     """
     try:
         data = _get("architecture", codebase_id=codebase_id)
@@ -531,6 +539,8 @@ def get_codebrain(codebase_id: str = "") -> str:
 
     Args:
         codebase_id: Codebase ID. Leave blank to use the first available codebase.
+    
+    @feature: Mcp Server Http
     """
     try:
         data = _get("codebrain", codebase_id=codebase_id)
@@ -552,6 +562,8 @@ def get_annotations(
         codebase_id: Codebase ID. Leave blank to use the first available codebase.
         target: Function or feature name to filter by.
         unresolved_only: Only return unresolved annotations (default True).
+    
+    @feature: Mcp Server Http
     """
     try:
         data = _get(
@@ -569,7 +581,7 @@ def get_annotations(
     for a in data:
         lines.append(
             f"[{(a.get('priority') or '').upper()}] {a.get('intent_type')} "
-            f"(target={str(a.get('target_entity_id', ''))[:12]})\n  {a.get('body')}\n"
+            f"(id={a.get('id', '')}, target={str(a.get('target_entity_id', ''))[:12]})\n  {a.get('body')}\n"
         )
     return "\n".join(lines)
 
@@ -594,6 +606,8 @@ def add_annotation(
         priority: normal | high | critical
         concepts: Optional list of concepts to auto-promote into the concept graph.
             Each entry: {name, level (1-3), description, universal (bool), prereqs (list[str])}
+    
+    @feature: Mcp Server Http
     """
     try:
         data = _post("annotations", {
@@ -621,6 +635,9 @@ def resolve_annotation(annotation_id: str, codebase_id: str = "") -> str:
     Args:
         annotation_id: The annotation ID to resolve (e.g. 'd463ac87-076').
         codebase_id: Codebase ID. Leave blank to use the first available codebase.
+    
+    @feature: Mcp Server Http
+    @reads: get_annotations
     """
     try:
         data = _post("resolve-annotation", {
@@ -654,6 +671,9 @@ def evaluate_jit_session(
         functions_changed: Same list of dicts passed to push_session_summary.
         codebase_id: Codebase ID. Leave blank to use the first available codebase.
         hours_back: How far back to look for JIT calls (default 4 hours).
+    
+    @feature: Mcp Server Http
+    @reads: this
     """
     try:
         data = _post("jit-evaluate-session", {
@@ -687,6 +707,8 @@ def report_change(
         new_file_paths: New file paths you created.
         deleted_functions: Function names you deleted.
         notes: Brief description of what changed and why.
+    
+    @feature: Mcp Server Http
     """
     try:
         data = _post("report-change", {
@@ -708,6 +730,8 @@ def list_stale(codebase_id: str = "") -> str:
 
     Args:
         codebase_id: Codebase ID. Leave blank to use the first available codebase.
+    
+    @feature: Mcp Server Http
     """
     try:
         rows = _get("stale", codebase_id=codebase_id)
@@ -748,6 +772,9 @@ def rescan_stale(codebase_id: str = "") -> str:
 
     Args:
         codebase_id: Codebase ID. Leave blank to use the first available codebase.
+    
+    @feature: Mcp Server Http
+    @mutates: and
     """
     try:
         rows = _get("stale", codebase_id=codebase_id)
@@ -905,6 +932,8 @@ def search_functions(query: str, codebase_id: str = "", limit: int = 10) -> str:
         query: Name or path substring.
         codebase_id: Codebase ID. Leave blank to use the first available codebase.
         limit: Max results (default 10).
+    
+    @feature: Mcp Server Http
     """
     try:
         rows = _get("search", query=query, codebase_id=codebase_id, limit=limit)
@@ -956,6 +985,8 @@ def push_session_summary(
         codebase_id: Leave blank to use the first available codebase.
         concepts: Optional list of concepts to auto-promote into the concept graph.
             Each entry: {name, level (1-3), description, universal (bool), prereqs (list[str])}
+    
+    @feature: Mcp Server Http
     """
     try:
         data = _post("session-summary", {
@@ -1006,6 +1037,9 @@ def push_module_context(
         codebase_id: Leave blank to use the first available codebase.
         concepts: Optional list of concepts to auto-promote into the concept graph.
             Each entry: {name, level (1-3), description, universal (bool), prereqs (list[str])}
+    
+    @feature: Mcp Server Http
+    @reads: this
     """
     try:
         data = _post("module-context", {
@@ -1049,6 +1083,8 @@ def push_learn_content(
         file_path: Source file path (e.g. "src/scraper.py"). Helps if not yet scanned.
         codebase_id: Leave blank to use the first available codebase.
         key_concepts: Deprecated — use concepts instead.
+    
+    @feature: Mcp Server Http
     """
     effective_concepts = concepts or []
     if not effective_concepts and key_concepts:
@@ -1090,6 +1126,8 @@ def push_concept_graph(
         nodes: List of concept node dicts.
         edges: List of concept edge dicts.
         codebase_id: Leave blank to use the first available codebase.
+    
+    @feature: Mcp Server Http
     """
     try:
         data = _post("concept-graph", {
@@ -1120,6 +1158,9 @@ def flag_unknown(
         codebase_id: Leave blank to use the first available codebase.
         concepts: Optional list of concepts to auto-promote into the concept graph.
             Each entry: {name, level (1-3), description, universal (bool), prereqs (list[str])}
+    
+    @feature: Mcp Server Http
+    @reads: your
     """
     try:
         data = _post("flag-unknown", {
@@ -1142,6 +1183,8 @@ def get_functions_for_evaluation(codebase_id: str = "", include_source: bool = F
     Args:
         codebase_id: Codebase ID. Leave blank to use the first available codebase.
         include_source: Include first 300 chars of each function's source.
+    
+    @feature: Mcp Server Http
     """
     try:
         rows = _get("functions", codebase_id=codebase_id,
@@ -1173,6 +1216,8 @@ def set_feature_mapping(mappings: list[dict], codebase_id: str = "") -> str:
         mappings: List of {"function_name": str, "feature_name": str, "file_path": str (optional)} dicts.
             Include file_path when the function hasn't been scanned yet so the stub is useful.
         codebase_id: Codebase ID. Leave blank to use the first available codebase.
+    
+    @feature: Mcp Server Http
     """
     try:
         data = _post("feature-mapping", {
@@ -1207,6 +1252,8 @@ def update_architecture_doc(
         codebase_name: Human-readable name (optional).
         concepts: Optional list of concepts to auto-promote into the concept graph.
             Each entry: {name, level (1-3), description, universal (bool), prereqs (list[str])}
+    
+    @feature: Mcp Server Http
     """
     try:
         data = _put("architecture", {
@@ -1235,6 +1282,8 @@ def check_work_claims(
         function_names: Functions you intend to modify.
         file_paths: Files you intend to modify (optional).
         codebase_id: Leave blank to use the first available codebase.
+    
+    @feature: Mcp Server Http
     """
     try:
         data = _post("work-claims/check", {
@@ -1330,6 +1379,9 @@ def claim_work(
         file_paths: Files you'll touch (optional).
         codebase_id: Leave blank to use the first available codebase.
         ttl_minutes: Claim TTL without a heartbeat (default 120 min).
+    
+    @feature: Mcp Server Http
+    @reads: rolling
     """
     try:
         data = _post("work-claims", {
@@ -1382,6 +1434,9 @@ def amend_work_claim(
         add_function_names: Additional functions to add to your claim.
         add_file_paths: Additional files to add to your claim.
         codebase_id: Leave blank to use the first available codebase.
+    
+    @feature: Mcp Server Http
+    @reads: functions
     """
     try:
         data = _post(f"work-claims/{claim_id}/amend", {
@@ -1432,6 +1487,8 @@ def heartbeat_work_claim(claim_id: str, codebase_id: str = "") -> str:
     Args:
         claim_id: The claim ID returned by claim_work.
         codebase_id: Leave blank to use the first available codebase.
+    
+    @feature: Mcp Server Http
     """
     try:
         data = _put(f"work-claims/{claim_id}/heartbeat", {"codebase_id": codebase_id})
@@ -1449,6 +1506,8 @@ def release_work(claim_id: str, codebase_id: str = "") -> str:
     Args:
         claim_id: The claim ID returned by claim_work.
         codebase_id: Leave blank to use the first available codebase.
+    
+    @feature: Mcp Server Http
     """
     try:
         with _client() as c:
@@ -1483,6 +1542,8 @@ def submit_feedback(
         type: "bug" or "feedback" (default "feedback").
         function_name: The function where the issue was noticed (optional).
         codebase_id: Codebase ID (optional, auto-detected if blank).
+    
+    @feature: Mcp Server Http
     """
     try:
         result = _post("feedback", {
@@ -1521,6 +1582,9 @@ def submit_test_report(
         description: Clear description of what you observed and why it matters.
         suggested_fix: Your idea for how to fix it. Do NOT implement — just describe.
         codebase_id: Leave blank to auto-detect.
+    
+    @feature: Mcp Server Http
+    @reads: within
     """
     try:
         result = _post("agent-test-report", {
@@ -1557,6 +1621,8 @@ def get_jit_context(description: str, codebase_id: str = "", user_id: int = 0) -
         description: User's plain-language description of the session goal.
         codebase_id: Leave blank to use the first available codebase.
         user_id: User ID for mastery lookup. 0 = use CODEBRAIN_USER_ID env var.
+    
+    @feature: Mcp Server Http
     """
     try:
         result = _get("jit-context", description=description, codebase_id=codebase_id, user_id=user_id or "")
@@ -1577,6 +1643,8 @@ def get_concept_details(concept_names: list[str], codebase_id: str = "") -> str:
     Args:
         concept_names: List of concept names to look up (from get_jit_context output).
         codebase_id: Leave blank to use the first available codebase.
+    
+    @feature: Mcp Server Http
     """
     try:
         result = _post("concept-details", {"concept_names": concept_names, "codebase_id": codebase_id})
@@ -1599,6 +1667,9 @@ def suggest_concept(name: str, description_hint: str = "", context: str = "", co
         description_hint: One sentence explaining what it means in this codebase.
         context: Where it came up — paste the relevant sentence from the conversation.
         codebase_id: Leave blank to use the first available codebase.
+    
+    @feature: Mcp Server Http
+    @reads: the
     """
     try:
         result = _post("suggest-concept", {
@@ -1623,6 +1694,8 @@ def list_concept_suggestions(codebase_id: str = "", limit: int = 20) -> str:
     Args:
         codebase_id: Leave blank to use the first available codebase.
         limit: Maximum number of suggestions to return (default 20).
+    
+    @feature: Mcp Server Http
     """
     try:
         result = _post("concepts/list-suggestions", {"codebase_id": codebase_id, "limit": limit})
@@ -1661,6 +1734,10 @@ def approve_concept(
         codebase_id: Leave blank to use the first available codebase.
         is_universal: True to add as a universal concept available to all codebases.
         suggestion_id: ID of an existing pending suggestion to approve (optional).
+    
+    @feature: Mcp Server Http
+    @reads: get_jit_context
+    @reads: the
     """
     try:
         result = _post("concepts/approve", {
@@ -1688,6 +1765,8 @@ def reject_concept(name: str = "", suggestion_id: str = "") -> str:
     Args:
         name: Name of the pending suggestion to reject (matched case-insensitively).
         suggestion_id: ID of the specific suggestion to reject (use instead of name if known).
+    
+    @feature: Mcp Server Http
     """
     try:
         return _post("concepts/reject", {"name": name, "suggestion_id": suggestion_id}).get("result", "")
@@ -1721,6 +1800,8 @@ def add_tentative_concept(
         description: One sentence describing the concept and its role in this codebase.
         level: 0=system-wide, 1=feature-level, 2=function-level, 3=implementation detail.
         codebase_id: Leave blank to use the first available codebase.
+    
+    @feature: Mcp Server Http
     """
     try:
         session_id = _get_session_id()
@@ -1757,6 +1838,9 @@ def record_mastery_feedback(
         user_comment: What the user said (their words, not paraphrased).
         session_context: Brief description of what they worked on this session (for context).
         codebase_id: Leave blank to use the first available codebase.
+    
+    @feature: Mcp Server Http
+    @reads: the
     """
     try:
         result = _post("mastery-feedback", {
@@ -1793,6 +1877,8 @@ def evaluate_jit_explanation(
         mastery_levels: Dict of {concept_name: p_l} from get_jit_context (0.0–1.0).
         codebase_id: Leave blank to use the first available codebase.
         user_id: User ID. 0 = use CODEBRAIN_USER_ID env var.
+    
+    @feature: Mcp Server Http
     """
     try:
         result = _post("evaluate-jit", {
@@ -1818,6 +1904,8 @@ def get_client_template(template: str = "CLAUDE.md", codebase_id: str = "") -> s
     Args:
         template: "CLAUDE.md", "session-start.md", or "session-end.md" (default "CLAUDE.md").
         codebase_id: Leave blank to read from local .codebrain file.
+    
+    @feature: Mcp Server Http
     """
     # Resolve codebase_id from .codebrain file if not provided
     cid = codebase_id
