@@ -1081,7 +1081,7 @@ name: CodeBrain rescan on push
 on:
   push:
     branches: [main, master]
-    paths: ['**.py']
+    paths: ['**.py', '**.ts', '**.tsx', '**.js', '**.jsx', '**.swift', '**.kt', '**.kts']
 
 jobs:
   rescan:
