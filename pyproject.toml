@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codebrain-cli"
-version = "23.0"
+version = "24.0"
 description = "CodeBrain client — connect your codebase to the CodeBrain understanding layer"
 readme = "README.md"
 requires-python = ">=3.10"
