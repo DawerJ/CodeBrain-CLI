@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "29"
+CLIENT_VERSION = "30"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -365,19 +365,28 @@ def get_session_context(codebase_id: str = "") -> str:
         lines.append(
             f"\n## New User Assist (session {user_session_count + 1} of 5)\n"
             "New user mode — follow these instructions throughout the session:\n\n"
-            "**Session start:** After reporting context, add one sentence on what CodeBrain just did:\n"
-            "  'I just loaded [N] sessions of history, [M] open unknowns, and your architecture doc — "
-            "this is the context I carry into every session so you never have to re-explain what you're building.'\n\n"
-            "**When JIT fires:** Deliver the 4-item fast load (Name + one-phrase tag each), then add:\n"
-            "  'I surfaced [X] because [reason from offer_text — e.g. inactive in WM / unknown mastery / "
-            "prerequisite for what you're building]. Got those? Any need more before we start?'\n\n"
-            "**After each major tool call or decision:** One sentence — what happened and why it matters.\n"
-            "  Examples: 'I just checked for work claims — making sure no teammates are editing the same functions.'\n"
-            "  'I called get_function_context to see what previous sessions discovered about this function.'\n\n"
-            "**At session end:** Show mastery delta explicitly with labels. Then:\n"
-            "  'CodeBrain updated its model of what you know. These numbers compound — by session 5, "
-            "it will know exactly where your gaps are and stop teaching you things you already understand.'\n\n"
-            f"{'**Reminder:** Mention that `/project:commands` shows all available commands, and `codebrain assist off` silences these hints.' if user_session_count in (0, 2, 4) else ''}"
+            "**Right after session start:** Say what CodeBrain loaded, then immediately offer a first action:\n"
+            "  'I just loaded your project context — [N] functions, [M] sessions of history, your architecture.\n"
+            "   Want to start with an architecture overview (`/project:explore`), or just tell me what you're building?'\n\n"
+            "**JIT fires on everything — including brainstorming.** Call get_jit_context the moment the user\n"
+            "describes ANYTHING: a task, a question, 'I'm thinking about...', 'how would I...'. Don't wait\n"
+            "for a formal task statement. Deliver the 4-item fast load, then:\n"
+            "  'I surfaced [X] because [reason — e.g. inactive/unknown/prerequisite]. Got those? Any need more?'\n\n"
+            "**Annotate decisions in real-time during brainstorming.** When the user makes a design decision,\n"
+            "explains a constraint, or discovers a tradeoff, call add_annotation immediately — don't ask first.\n"
+            "Then say: 'I just annotated that decision so it lives in CodeBrain permanently.'\n\n"
+            "**If the user asks how CodeBrain works:** Explain the 3 loops + 3 graphs + JIT + mastery in 4 bullets.\n"
+            "Then: 'The short version: it silently learns what you know and delivers exactly the right context\n"
+            "at the right moment. Each session it gets more accurate about your specific gaps.'\n\n"
+            "**Suggest commands at natural moments:**\n"
+            "  - After session start with no clear task → 'Try `/project:explore` for an overview'\n"
+            "  - When debugging → 'Want to trace this with `/project:investigate`?'\n"
+            "  - When a decision is made → annotate it (don't just suggest)\n"
+            "  - When context feels heavy → 'Good stopping point — `/project:session-end` to save this?'\n\n"
+            "**After each major tool call:** One sentence. 'I just [what] — [why it matters].'\n\n"
+            "**At session end:** Show mastery delta + say: 'These numbers compound — by session 5,\n"
+            "CodeBrain knows exactly where your gaps are and stops teaching you things you already understand.'\n\n"
+            f"{'**Reminder:** End with: `/project:commands` for all available commands. `codebrain assist off` to silence these hints.' if user_session_count in (0, 2, 4) else ''}"
         )
 
     sessions = data.get("recent_sessions") or []
