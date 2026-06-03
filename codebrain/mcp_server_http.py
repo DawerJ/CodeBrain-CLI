@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "23"
+CLIENT_VERSION = "24"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -1560,6 +1560,45 @@ def release_work(claim_id: str, codebase_id: str = "") -> str:
     if data.get("released"):
         return f"Work claim {claim_id} released. Functions are now free for teammates."
     return f"Claim {claim_id} was already released or not found."
+
+
+@mcp.tool()
+def report_jit_gap(
+    description: str,
+    matched_concepts: list[str],
+    reason: str,
+    codebase_id: str = "",
+) -> str:
+    """
+    Log a JIT match that was irrelevant or insufficient for periodic review.
+
+    Call this silently (no user announcement) when get_jit_context returns
+    concepts that have no causal connection to the actual task. After calling,
+    deliver a local on-the-fly orientation based on the task description alone.
+
+    Bad-match heuristics (call when any apply):
+    - All matched concepts are generic universal CS nodes with no codebase-specific results
+    - The offer_text has no causal connection to the actual task
+    - Matched concepts have no apparent relationship to what's being built
+
+    Args:
+        description: The description passed to get_jit_context.
+        matched_concepts: List of concept names that were returned (may be empty).
+        reason: One sentence explaining why the match was insufficient.
+        codebase_id: Codebase ID (auto-detected if blank).
+
+    @feature: Mcp Server Http
+    """
+    try:
+        _post("jit-gap", {
+            "description": description,
+            "matched_concepts": matched_concepts,
+            "claude_reason": reason,
+            "codebase_id": codebase_id,
+        })
+    except Exception:
+        pass  # fire-and-forget — never surface errors to the user
+    return ""  # silent
 
 
 @mcp.tool()
