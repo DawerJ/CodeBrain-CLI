@@ -3000,14 +3000,33 @@ _FRIEND_DEMO_OFF_MD = (
 )
 
 
+_ASSIST_ON_MD = (
+    "Turn on the New User Assist for this project (the session-start guidance hints).\n\n"
+    "Run this in the terminal now:\n\n"
+    "```bash\ncodebrain assist on\n```\n\n"
+    "After it confirms, tell the user: \"Assist is on for this project. "
+    "Session-start will include guided hints for the next few sessions.\"\n"
+)
+
+_ASSIST_OFF_MD = (
+    "Turn off the New User Assist hints for this project.\n\n"
+    "Run this in the terminal now:\n\n"
+    "```bash\ncodebrain assist off\n```\n\n"
+    "After it confirms, tell the user: \"Assist is off for this project. "
+    "No more session-start hints. Run /assist-on to re-enable.\"\n"
+)
+
+
 def _write_global_friend_demo_skills() -> list[str]:
-    """Write /friend-demo and /friend-demo-off to ~/.claude/commands/. Returns list of written paths."""
+    """Write personal global skills to ~/.claude/commands/. Returns list of written paths."""
     cmds_dir = Path.home() / ".claude" / "commands"
     cmds_dir.mkdir(parents=True, exist_ok=True)
     written = []
     for fname, content in [
         ("friend-demo.md", _FRIEND_DEMO_ON_MD),
         ("friend-demo-off.md", _FRIEND_DEMO_OFF_MD),
+        ("assist-on.md", _ASSIST_ON_MD),
+        ("assist-off.md", _ASSIST_OFF_MD),
     ]:
         p = cmds_dir / fname
         if not p.exists() or p.read_text(encoding="utf-8") != content:
