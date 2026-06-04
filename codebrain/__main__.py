@@ -2882,6 +2882,9 @@ def cmd_demo_mode(args: argparse.Namespace) -> int:
     .mcp.json.bak is created on `on` and removed on `off` — gitignored automatically.
 
     @feature: Main
+    
+    @reads: cwd
+    @reads: project
     """
     from .config import load as _load_cfg, save as _save_cfg
 
@@ -2915,13 +2918,24 @@ def cmd_demo_mode(args: argparse.Namespace) -> int:
             print("  codebrain demo-mode on --set-key <your-demo-api-key>")
             return 1
 
+        # Walk up from cwd to find .mcp.json (Claude Code may run from project subdirectory)
+        search = Path.cwd()
+        while search != search.parent:
+            if (search / ".mcp.json").exists():
+                mcp_path = search / ".mcp.json"
+                bak_path = search / ".mcp.json.bak"
+                break
+            search = search.parent
+
         if bak_path.exists():
-            print("Already in demo mode (.mcp.json.bak exists). Run 'codebrain demo-mode off' first.")
+            print(f"Already in demo mode ({bak_path} exists). Run 'codebrain demo-mode off' first.")
             return 1
 
         if not mcp_path.exists():
-            print("No .mcp.json found. Run 'codebrain new' first.")
+            print("No .mcp.json found in this directory or any parent. Run 'codebrain new' first.")
             return 1
+
+        print(f"  Using {mcp_path}")
 
         current = json.loads(mcp_path.read_text(encoding="utf-8"))
         demo = json.loads(json.dumps(current))  # deep copy
@@ -2943,11 +2957,21 @@ def cmd_demo_mode(args: argparse.Namespace) -> int:
         return 0
 
     elif action == "off":
+        # Walk up to find the backup file
+        search = Path.cwd()
+        while search != search.parent:
+            if (search / ".mcp.json.bak").exists():
+                bak_path = search / ".mcp.json.bak"
+                mcp_path = search / ".mcp.json"
+                break
+            search = search.parent
+
         if not bak_path.exists():
             print("Not in demo mode (.mcp.json.bak not found). Nothing to restore.")
             return 1
 
         bak_path.replace(mcp_path)
+        print(f"  Restored {mcp_path}")
         print("  Switched back to your personal account.")
         print("  Reload Claude Code: Ctrl+Shift+P → Developer: Reload Window")
         return 0
