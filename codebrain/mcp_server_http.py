@@ -34,7 +34,7 @@ _API_KEY  = os.environ.get("CODEBRAIN_API_KEY", "")
 
 # Bump this whenever a git pull is required to get new MCP tools or fixes.
 # Must match the version returned by GET /health on the server.
-CLIENT_VERSION = "43"
+CLIENT_VERSION = "44"
 
 mcp = FastMCP(
     "CodeBrain",
@@ -988,6 +988,33 @@ def rescan_stale(codebase_id: str = "") -> str:
 
 
 @mcp.tool()
+def embed_concepts(codebase_id: str = "") -> str:
+    """
+    Generate and store embeddings for concept nodes that don't have one yet.
+
+    Activates the semantic fallback in the JIT pipeline — after running this,
+    JIT can find relevant concepts via embedding similarity when keyword search
+    returns fewer than 3 candidates. Safe to re-run; only processes nodes
+    missing embeddings.
+
+    Args:
+        codebase_id: Codebase ID. Leave blank to use the first available codebase.
+
+    @feature: Mcp Server Http
+    """
+    try:
+        data = _post("concepts/embed", {"codebase_id": codebase_id})
+    except Exception as e:
+        return _fmt_err(e)
+    if "error" in data:
+        return f"Error: {data['error']}"
+    count = data.get("embedded", 0)
+    if count == 0:
+        return "All concept nodes already have embeddings — semantic fallback is active."
+    return f"Embedded {count} concept node(s). Semantic fallback is now active."
+
+
+@mcp.tool()
 def search_functions(query: str, codebase_id: str = "", limit: int = 10) -> str:
     """
     Search for functions by name or file path.
@@ -996,7 +1023,7 @@ def search_functions(query: str, codebase_id: str = "", limit: int = 10) -> str:
         query: Name or path substring.
         codebase_id: Codebase ID. Leave blank to use the first available codebase.
         limit: Max results (default 10).
-    
+
     @feature: Mcp Server Http
     """
     try:
